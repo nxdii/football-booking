@@ -63,6 +63,12 @@ h4{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.6px
 .bar i{display:block;height:100%;border-radius:99px}.bar b{position:absolute;top:-3px;width:2px;height:14px;background:var(--text)}
 input[type=datetime-local]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;color-scheme:dark}
 input[type=time]{color-scheme:dark}
+.heat{display:flex;gap:3px;margin:6px 0 10px}
+.hs{flex:1;position:relative;text-align:center;border-radius:6px;overflow:hidden;background:var(--card2);padding:4px 0;border:2px solid transparent}
+.hs.ko{border-color:var(--text)}
+.hs .hb{position:absolute;inset:0;background:var(--accent)}
+.hs span,.hs small{position:relative;display:block;line-height:1.2}.hs span{font-weight:700;font-size:13px}.hs small{font-size:10px;color:var(--text)}
+.slots button{padding:6px 10px;font-size:13px}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .sw{width:14px;height:14px;border-radius:4px;display:inline-block}
@@ -148,7 +154,28 @@ const fmtTime = t => String(t||'').slice(0,5);
 const fmtDT = d => d.toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
 const kickoffDate = s => new Date(`${s.day}T${fmtTime(s.kickoff)}:00`);
 const endDate = s => new Date(kickoffDate(s).getTime() + Number(s.hours)*3600e3);
-const cancelDeadline = s => new Date(kickoffDate(s).getTime() - s.free_cancel_hours*3600e3);
+const hm = t => { const [h, m] = fmtTime(t).split(':').map(Number); return h + (m||0)/60; };
+const hhmm = x => `${pad(Math.floor(x))}:${pad(Math.round((x % 1) * 60))}`;
+const timeSet = s => s.time_set !== false;
+// Hours someone must be free for the set kick-off (slot h covers h:00 to h+1:00)
+function neededSlots(s){ const st = hm(s.kickoff), out = []; for (let h = Math.floor(st); h < Math.ceil(st + Number(s.hours)); h++) out.push(h); return out; }
+function windowSlots(s){
+  if (!s.window_start || !s.window_end) return neededSlots(s);
+  const out = []; for (let h = Math.floor(hm(s.window_start)); h < Math.ceil(hm(s.window_end)); h++) out.push(h); return out;
+}
+const rowSlots = (s, r) => (r && r.slots && r.slots.length) ? r.slots : windowSlots(s);
+const suits = (s, r) => !timeSet(s) || !r.slots || !r.slots.length || neededSlots(s).every(h => r.slots.includes(h));
+const slotLabel = h => `${pad(h % 24)}:00`;
+function bestTimes(s, sq){
+  const len = Number(s.hours), ws = s.window_start ? hm(s.window_start) : hm(s.kickoff), we = s.window_end ? hm(s.window_end) : ws + len;
+  const res = [];
+  for (let st = Math.floor(ws); st + len <= we + 1e-9; st++){
+    const need = []; for (let h = st; h < Math.ceil(st + len); h++) need.push(h);
+    const n = sq.inS.concat(sq.wait).reduce((c, r) => c + ((!r.slots || !r.slots.length || need.every(h => r.slots.includes(h))) ? 1 + r.plus_ones : 0), 0);
+    res.push({ st, n });
+  }
+  return res.sort((a, b) => b.n - a.n || a.st - b.st);
+}
 const splitHead = (total, cap) => cap > 0 ? Math.ceil(Number(total)/cap*10)/10 : 0;
 const val = id => document.getElementById(id)?.value ?? '';
 const stars = n => '★'.repeat(n) + '<span style="opacity:.25">' + '★'.repeat(5-n) + '</span>';
@@ -199,7 +226,7 @@ const S = {
   me: null, isHost:false, hostKey: qs.get('host') || (()=>{ try { return localStorage.getItem('fb_host'); } catch { return null; } })(),
   groupPwRequired:false, groupPw:'',
   tab:'cal', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-  sel:null, quick:false, proposeMode:false, picks:new Set(), plus:{}, prof:null, teamsDraft:{}, pick:null,
+  sel:null, quick:false, proposeMode:false, picks:new Set(), slotDraft:{}, plus:{}, prof:null, teamsDraft:{}, pick:null,
 };
 try { S.me = JSON.parse(localStorage.getItem('fb_me') || 'null'); } catch {}
 if (qs.get('me')) {
@@ -243,7 +270,7 @@ const Remote = {
   getGroupPassword: () => rpc('host_get_group_password', {p_key:S.hostKey}),
   setGroupPassword: pw => rpc('host_set_group_password', {p_key:S.hostKey, p_pw:pw}),
   savePlayer: o => rpc('save_player', {p_id:o.id||null, p_token:o.token||null, p_name:o.name, p_skill:o.skill, p_can:o.can, p_cannot:o.cannot, p_host_key:hk(), p_group_pw:o.groupPw||null}),
-  setAvail: o => rpc('set_availability', {p_player:o.player, p_token:o.token||null, p_day:o.day, p_on:o.on, p_plus:o.plus||0, p_plus_names:o.plusNames||'', p_plus_skill:o.plusSkill||3, p_host_key:hk()}),
+  setAvail: o => rpc('set_availability', {p_player:o.player, p_token:o.token||null, p_day:o.day, p_on:o.on, p_plus:o.plus||0, p_plus_names:o.plusNames||'', p_plus_skill:o.plusSkill||3, p_host_key:hk(), p_slots:o.slots||null}),
   saveSettings: p => rpc('host_save_settings', {p_key:S.hostKey, p}),
   upsertSession: p => rpc('host_upsert_session', {p_key:S.hostKey, p}),
   cancelSession: day => rpc('host_cancel_session', {p_key:S.hostKey, p_day:day}),
@@ -260,7 +287,7 @@ const Mock = (() => {
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id' + Math.random().toString(16).slice(2) + Date.now());
   let seedN = 7; const rnd = () => (seedN = (seedN * 9301 + 49297) % 233280) / 233280;
   function seed(){
-    const settings = { id:1, group_name:'Weekly 7-a-side', default_kickoff:'19:00:00', default_hours:1, price_total:84, price_per_head:6,
+    const settings = { id:1, group_name:'Weekly 7-a-side', default_kickoff:'18:00:00', default_window_end:'22:00:00', default_hours:2, price_total:84, price_per_head:6,
       free_cancel_hours:48, book_days_before:7, min_players:10, location_name:'Demo Sports Centre, Pitch 2', location_address:'1 Example Road, London',
       location_url:'', cap:14, format:7, bank_name:'Your Name', bank_sort:'00-00-00', bank_account:'12345678', bank_ref:'Football + your name', notes:'Bring a dark and a light top.' };
     const names = ['Adam','Bilal','Chris','Dan','Ehsan','Femi','George','Hamza','Imran','Jack','Kofi','Luke','Musa','Nabil','Omar','Sam'];
@@ -277,11 +304,11 @@ const Mock = (() => {
       players.forEach((pl, i) => { if (rnd() < p) avail.push({ player_id:pl.id, day, plus_ones: rnd() < .08 ? 1 : 0, plus_one_names:'', plus_one_skill:3, status:'available',
         created_at:new Date(Date.now() - 1e8 + i*1e5 + d*1e3).toISOString(), dropped_at:null, paid:false, waived:false }); });
     }
-    const base = { kickoff:'19:00:00', hours:1, price_total:84, price_per_head:6, free_cancel_hours:48, min_players:10,
+    const base = { kickoff:'19:00:00', window_start:'18:00:00', window_end:'22:00:00', time_set:true, hours:2, price_total:84, price_per_head:6, free_cancel_hours:48, min_players:10,
       location_name:settings.location_name, location_address:settings.location_address, location_url:'', cap:14, format:7, notes:settings.notes, teams:null };
     const propDay = iso(addDays(new Date(), 12));
     const sessions = [{ ...base, day:sessDay, status:'booked', confirm_by:addDays(new Date(), -2).toISOString() },
-                      { ...base, day:propDay, status:'proposed', confirm_by:addDays(new Date(), 4).toISOString() }].sort((a,b)=>a.day<b.day?-1:1);
+                      { ...base, day:propDay, kickoff:'18:00:00', time_set:false, status:'proposed', confirm_by:addDays(new Date(), 4).toISOString() }].sort((a,b)=>a.day<b.day?-1:1);
     const live = new Set(sessions.map(s => s.day));
     for (let i = avail.length - 1; i >= 0; i--) if (!live.has(avail[i].day)) avail.splice(i, 1);
     return { hostKey:'demo', groupPw:'', settings, players, avail, sessions };
@@ -323,14 +350,14 @@ const Mock = (() => {
       if (o.on && !row && sess && sess.status !== 'booked' && sess.confirm_by && new Date() >= new Date(sess.confirm_by) && !isHost(hk()))
         throw new Error('Confirmations for this day have closed. Ask the host to add you');
       if (o.on){
-        const vals = { plus_ones:Math.max(0,Math.min(5,o.plus||0)), plus_one_names:o.plusNames||'', plus_one_skill:o.plusSkill||3 };
+        const vals = { plus_ones:Math.max(0,Math.min(5,o.plus||0)), plus_one_names:o.plusNames||'', plus_one_skill:o.plusSkill||3, ...(o.slots ? { slots:o.slots } : {}) };
         if (!row) db.avail.push({ player_id:o.player, day:o.day, ...vals, status:'available', created_at:new Date().toISOString(), dropped_at:null, paid:false, waived:false });
         else { if (row.status === 'late_drop') row.created_at = new Date().toISOString(); Object.assign(row, vals, {status:'available', dropped_at:null}); }
         save(); return 'available';
       }
       if (!row) return 'removed';
       if (row.status === 'late_drop') return 'late_drop';
-      if (sess && sess.status === 'booked'){
+      if (sess && sess.status === 'booked' && suits(sess, row)){
         const sq = squadOf(db.avail.filter(a => a.day === o.day), sess.cap);
         if (sq.inS.includes(row)){ row.status = 'late_drop'; row.dropped_at = new Date().toISOString(); save(); return 'late_drop'; }
       }
@@ -474,10 +501,21 @@ function progressBar(s, sq){
     <div class="small muted">${sq.heads} in${s.min_players ? ` · need ${s.min_players} to go ahead` : ''} · max ${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</div></div>`;
 }
 
+function slotHeat(s, sq){
+  const slots = windowSlots(s);
+  if (slots.length < 2 && timeSet(s)) return '';
+  const rows = sq.inS.concat(sq.wait);
+  const counts = slots.map(h => rows.reduce((c, r) => c + (rowSlots(s, r).includes(h) ? 1 + r.plus_ones : 0), 0));
+  const max = Math.max(1, ...counts), need = timeSet(s) ? neededSlots(s) : [];
+  return `<div class="heat">${slots.map((h, i) => `<div class="hs ${need.includes(h) ? 'ko' : ''}" title="${counts[i]} free ${slotLabel(h)}–${slotLabel(h+1)}">
+      <div class="hb" style="opacity:${counts[i] ? .25 + .75 * counts[i] / max : .08}"></div><span>${counts[i]}</span><small>${pad(h % 24)}</small></div>`).join('')}</div>
+    <div class="small muted" style="margin:-4px 0 12px">People free each hour${need.length ? ' · outlined hours are the kick-off' : ''}</div>`;
+}
+
 function sessionInfo(s){
   const link = mapLink(s);
   return `<div class="info">
-    <b>When</b><span>${fmtTime(s.kickoff)}–${endDate(s).toTimeString().slice(0,5)} (${Number(s.hours)}h)</span>
+    <b>When</b><span>${timeSet(s) ? `${fmtTime(s.kickoff)}–${endDate(s).toTimeString().slice(0,5)} (${Number(s.hours)}h)` : `Kick-off to be set · ${Number(s.hours)}h game`}${s.window_start && s.window_end ? `<br><span class="muted small">Host is free ${fmtTime(s.window_start)}–${fmtTime(s.window_end)}</span>` : ''}</span>
     <b>Where</b><span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(s.location_name || s.location_address || 'Map')}</a>` : esc(s.location_name)}${s.location_address ? '<br><span class="muted small">' + esc(s.location_address) + '</span>' : ''}</span>
     <b>Price</b><span>${money(s.price_per_head)} each${Number(s.price_total) ? ` <span class="muted small">(pitch ${money(s.price_total)})</span>` : ''}</span>
     <b>Pull out</b><span>${isBooked(s) ? 'The pitch is booked, so pulling out now means you still pay your share' : 'Free until the pitch is booked. After that you still pay your share'}</span>
@@ -500,10 +538,20 @@ function myControls(day, sess, sq){
     const wi = sq.wait.indexOf(r);
     status = wi >= 0 ? `<span class="tag wait">Waitlist #${wi+1}</span>` : `<span class="tag in">You're in</span>`;
   }
+  if (r && !suits(sess, r)){
+    return `<div class="mine-box"><b>Kick-off is now ${fmtTime(sess.kickoff)}–${endDate(sess).toTimeString().slice(0,5)}</b>, which isn't in the hours you picked. Can you still make it?
+      <div class="row" style="margin-top:10px"><button class="btn primary" data-act="can-make" data-v="${day}">I can make it</button><button class="btn danger" data-act="avail-off" data-v="${day}">Pull out (free)</button></div></div>`;
+  }
   const n = S.plus[day] ?? (r ? r.plus_ones : 0);
+  const ws = windowSlots(sess);
+  const chosen = S.slotDraft[day] || new Set(rowSlots(sess, r));
+  const picker = ws.length > 1 ? `<div class="small muted" style="margin-bottom:6px">${timeSet(sess) ? 'Hours you can do' : 'Tap the hours that suit you'}</div>
+    <div class="choice slots">${ws.map(h => `<button class="${chosen.has(h) ? 'on' : ''}" data-act="slot" data-v="${day}|${h}">${slotLabel(h)}</button>`).join('')}</div>` : '';
   return `<div class="mine-box">
-    ${r ? `<div class="row" style="justify-content:space-between;margin-bottom:10px">${status}<button class="btn danger" data-act="avail-off" data-v="${day}">Pull out</button></div>`
-        : `<button class="btn primary big" data-act="avail-on" data-v="${day}">I'm in</button>`}
+    ${r ? `<div class="row" style="justify-content:space-between;margin-bottom:10px">${status}<button class="btn danger" data-act="avail-off" data-v="${day}">Pull out</button></div>` : ''}
+    ${picker}
+    ${r ? (ws.length > 1 ? `<div style="margin-top:10px"><button class="btn" data-act="avail-on" data-v="${day}">Save hours</button></div>` : '')
+        : `<button class="btn primary big" style="margin-top:10px" data-act="avail-on" data-v="${day}">I'm in</button>`}
     <div class="row" style="margin-top:10px"><span class="small muted">Bringing a +1?</span>
       <div class="stepper"><button data-act="plus" data-v="-1" aria-label="Fewer">−</button><span id="plusN">${n}</span><button data-act="plus" data-v="1" aria-label="More">+</button></div></div>
     <div id="plusMore">
@@ -520,10 +568,12 @@ function syncPlusUI(){
 }
 
 // Shared fields for proposing and editing a game
-function sessionFields(d, withConfirm){
+function sessionFields(d, withConfirm, withKickoff){
   return `<div class="grid3">
-      <div><label class="f">Kick-off</label><input type="time" id="f_kickoff" value="${fmtTime(d.kickoff)}"></div>
-      <div><label class="f">Hours</label><input type="number" step="0.5" min="0.5" id="f_hours" value="${Number(d.hours)}"></div>
+      <div><label class="f">I'm free from</label><input type="time" id="f_wstart" value="${fmtTime(d.window_start || d.kickoff)}"></div>
+      <div><label class="f">Until</label><input type="time" id="f_wend" value="${fmtTime(d.window_end || hhmm(hm(d.kickoff) + Number(d.hours)))}"></div>
+      <div><label class="f">Game length (hours)</label><input type="number" step="0.5" min="0.5" id="f_hours" value="${Number(d.hours)}"></div>
+      ${withKickoff ? `<div><label class="f">Kick-off (blank = not set yet)</label><input type="time" id="f_kickoff" value="${timeSet(d) ? fmtTime(d.kickoff) : ''}"></div>` : ''}
       <div><label class="f">Min players to go ahead</label><input type="number" min="0" id="f_min" value="${d.min_players}"></div>
       <div><label class="f">Pitch total £</label><input type="number" step="0.01" min="0" id="f_total" value="${Number(d.price_total)}"></div>
       <div><label class="f">Per head £</label><input type="number" step="0.01" min="0" id="f_head" value="${Number(d.price_per_head)}"></div>
@@ -537,11 +587,12 @@ function sessionFields(d, withConfirm){
     <label class="f">Notes for players</label><textarea id="f_notes">${esc(d.notes)}</textarea>`;
 }
 function readSessionFields(){
-  return { kickoff:val('f_kickoff'), hours:Number(val('f_hours'))||1, min_players:Math.max(0, parseInt(val('f_min'))||0),
+  const ws = val('f_wstart'), we = val('f_wend'), ko = val('f_kickoff');
+  return { window_start:ws, window_end:we, kickoff:ko || ws, time_set:!!ko, hours:Number(val('f_hours'))||1, min_players:Math.max(0, parseInt(val('f_min'))||0),
     price_total:Number(val('f_total'))||0, price_per_head:Number(val('f_head'))||0, cap:Math.max(2, parseInt(val('f_cap'))||14),
     format:parseInt(val('f_format'))||7, location_name:val('f_lname'), location_address:val('f_laddr'), location_url:val('f_lurl'), notes:val('f_notes') };
 }
-const settingsDefaults = () => ({ kickoff:S.settings.default_kickoff, hours:S.settings.default_hours, min_players:S.settings.min_players ?? 10,
+const settingsDefaults = () => ({ kickoff:S.settings.default_kickoff, window_start:S.settings.default_kickoff, window_end:S.settings.default_window_end || hhmm(hm(S.settings.default_kickoff) + Number(S.settings.default_hours) + 2), time_set:false, hours:S.settings.default_hours, min_players:S.settings.min_players ?? 10,
   price_total:S.settings.price_total, price_per_head:S.settings.price_per_head, cap:S.settings.cap, format:S.settings.format,
   location_name:S.settings.location_name, location_address:S.settings.location_address, location_url:S.settings.location_url, notes:S.settings.notes });
 
@@ -552,7 +603,7 @@ function proposeForm(){
   if (!days.length) return h + `<p class="muted">Tap the days you can do on the calendar. You can pick as many as you like.</p></div>`;
   h += `<div class="row" style="margin-bottom:6px">${days.map(d => `<span class="chip can" style="font-size:13px">${fmtShort(d)}${sessionOn(d) ? ' (update)' : ''}</span>`).join('')}</div>
     <p class="muted small">Friends confirm by <b>11pm the night before slots open</b> (${Number(S.settings.book_days_before ?? 7)} days before, change this in Host setup). For the first one that's ${fmtDT(defaultConfirmBy(days[0]))}. You can tweak each day after.</p>`;
-  h += sessionFields(settingsDefaults(), false);
+  h += sessionFields(settingsDefaults(), false, false);
   h += `<div class="row" style="margin-top:12px"><button class="btn primary" data-act="propose-save">Propose ${days.length} ${days.length === 1 ? 'game' : 'games'}</button>
     <button class="btn" data-act="propose-clear">Clear selection</button></div></div>`;
   return h;
@@ -567,8 +618,11 @@ function hostDayForm(day, sess){
       : `<button class="btn primary" data-act="sess-status" data-v="${day}|booked">⚽ Mark pitch as booked</button>`}</div>
     ${notOn.length ? `<div class="row" style="margin-top:10px"><select id="hostAdd" style="flex:1">${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
       <button class="btn" data-act="host-add" data-v="${day}">Add to this game</button></div>` : ''}
+    <h4>Set kick-off</h4>
+    ${(() => { const b = bestTimes(sess, squad(day)).slice(0, 3); return b.length ? `<div class="choice">${b.map(x => `<button data-act="pick-time" data-v="${day}|${hhmm(x.st)}">${hhmm(x.st)} · ${x.n} can make it</button>`).join('')}</div>` : ''; })()}
+    <p class="muted small">Tap a suggestion to set the kick-off, or type a time below. People whose hours don't cover it get asked to confirm or pull out for free.</p>
     <h4>Edit game</h4>
-    ${sessionFields(d, !isBooked(sess))}
+    ${sessionFields(d, !isBooked(sess), true)}
     <div class="row" style="margin-top:12px"><button class="btn primary" data-act="sess-save" data-v="${day}">Save changes</button>
       <button class="btn danger" data-act="sess-cancel" data-v="${day}">Cancel game</button></div>`;
 }
@@ -583,9 +637,10 @@ function viewDay(day){
     if (host) h += `<div style="margin-top:12px"><button class="btn primary" data-act="propose-day" data-v="${day}">Propose a game this day</button></div>`;
     return h + '</div>';
   }
-  h += `<div style="margin-bottom:10px">${statusLine(sess)}</div>${progressBar(sess, sq)}${sessionInfo(sess)}`;
+  h += `<div style="margin-bottom:10px">${statusLine(sess)}</div>${progressBar(sess, sq)}${slotHeat(sess, sq)}${sessionInfo(sess)}`;
   if (S.me && !past && !started) h += myControls(day, sess, sq);
-  h += `<h4>In · ${sq.heads}/${sq.cap}</h4>` + (sq.inS.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
+  const clash = r => suits(sess, r) ? '' : '<span class="tag wait">time doesn\'t suit</span>';
+  h += `<h4>In · ${sq.heads}/${sq.cap}</h4>` + (sq.inS.map(r => personLine(r, clash(r), host)).join('') || '<p class="muted">Nobody yet</p>');
   if (sq.wait.length) h += `<h4>Waitlist</h4>` + sq.wait.map((r,i) => personLine(r, `<span class="tag wait">#${i+1}</span>`, host)).join('');
   if (sq.late.length) h += `<h4>Pulled out after booking</h4>` + sq.late.map(r => personLine(r, '<span class="tag late">owes</span>', host)).join('');
   if (host) h += hostDayForm(day, sess);
@@ -761,8 +816,9 @@ function viewSetup(){
   <div class="card"><h3>Default session details</h3><p class="muted small" style="margin-top:0">Pre-filled whenever you propose games. You can still change them per game. Friends must confirm by 11pm the night before pitch slots open.</p>
     ${field('group_name','Group name',st.group_name)}
     <div class="grid3">
-      ${field('default_kickoff','Kick-off',fmtTime(st.default_kickoff),'time')}
-      ${field('default_hours','Hours',Number(st.default_hours),'number','step="0.5" min="0.5"')}
+      ${field('default_kickoff','Usually free from',fmtTime(st.default_kickoff),'time')}
+      ${field('default_window_end','Until',fmtTime(st.default_window_end || '22:00'),'time')}
+      ${field('default_hours','Game length (hours)',Number(st.default_hours),'number','step="0.5" min="0.5"')}
       ${field('book_days_before','Pitch slots open (days before)',st.book_days_before ?? 7,'number','min="0"')}
       ${field('price_total','Pitch total £',Number(st.price_total),'number','step="0.01" min="0"')}
       ${field('price_per_head','Per head £',Number(st.price_per_head),'number','step="0.01" min="0"')}
@@ -784,9 +840,15 @@ function viewSetup(){
 }
 
 // ---------------------------------------------------------------- actions
+function slotsFor(day){
+  const sess = sessionOn(day); if (!sess) return null;
+  const set = S.slotDraft[day] || new Set(rowSlots(sess, myRow(day)));
+  return [...set].sort((a, b) => a - b);
+}
 async function setMine(day, on){
+  if (on){ const sl = slotsFor(day); if (sl && !sl.length) throw new Error('Pick at least one hour that suits you'); }
   const n = Number(document.getElementById('plusN')?.textContent ?? S.plus[day] ?? 0);
-  return API.setAvail({ player:S.me.id, token:S.me.token, day, on,
+  return API.setAvail({ player:S.me.id, token:S.me.token, day, on, slots: on ? slotsFor(day) : null,
     plus: on ? (S.plus[day] ?? (myRow(day)?.plus_ones || 0) ?? n) : 0,
     plusNames: on ? (document.getElementById('plusNames')?.value ?? myRow(day)?.plus_one_names ?? '') : '',
     plusSkill: on ? Number(document.getElementById('plusSkill')?.value ?? myRow(day)?.plus_one_skill ?? 3) : 3 });
@@ -795,7 +857,7 @@ async function pullOut(day){
   const sess = sessionOn(day), r = myRow(day);
   if (sess && r){
     const sq = squad(day);
-    if (sq.inS.includes(r) && isBooked(sess)){
+    if (sq.inS.includes(r) && isBooked(sess) && suits(sess, r)){
       if (!(await ask(`The pitch is already booked, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`, 'Pull out'))) return;
     } else if (!(await ask('Pull out of this session?'))) return;
   }
@@ -819,7 +881,7 @@ const H = {
       if (sess && new Date() >= kickoffDate(sess)) return toast('That session has already kicked off', true);
       const r = myRow(v);
       if (r && r.status === 'available') await pullOut(v);
-      else { await API.setAvail({ player:S.me.id, token:S.me.token, day:v, on:true, plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 }); }
+      else { await API.setAvail({ player:S.me.id, token:S.me.token, day:v, on:true, slots:rowSlots(sess, r), plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 }); }
       S.sel = v; return reload();
     }
     S.sel = S.sel === v ? null : v; delete S.plus[v]; render();
@@ -828,7 +890,15 @@ const H = {
   'plus': v => { const day = S.sel; const r = myRow(day);
     const n = Math.max(0, Math.min(5, (S.plus[day] ?? (r ? r.plus_ones : 0)) + Number(v)));
     S.plus[day] = n; document.getElementById('plusN').textContent = n; syncPlusUI(); },
-  'avail-on': async v => { await setMine(v, true); delete S.plus[v]; toast('Saved'); await reload(); },
+  'avail-on': async v => { await setMine(v, true); delete S.plus[v]; delete S.slotDraft[v]; toast('Saved'); await reload(); },
+  'slot': (v, el) => { const [day, h] = v.split('|'); const sess = sessionOn(day);
+    const set = S.slotDraft[day] || (S.slotDraft[day] = new Set(rowSlots(sess, myRow(day))));
+    const n = Number(h); set.has(n) ? set.delete(n) : set.add(n); el.classList.toggle('on', set.has(n)); },
+  'can-make': async v => { const sess = sessionOn(v), r = myRow(v);
+    S.slotDraft[v] = new Set([...rowSlots(sess, r), ...neededSlots(sess)]);
+    await API.setAvail({ player:S.me.id, token:S.me.token, day:v, on:true, slots:slotsFor(v), plus:r.plus_ones, plusNames:r.plus_one_names, plusSkill:r.plus_one_skill });
+    delete S.slotDraft[v]; toast('Thanks, you\'re in'); await reload(); },
+  'pick-time': v => { const [day, t] = v.split('|'); const el = document.getElementById('f_kickoff'); if (el){ el.value = t; el.scrollIntoView({behavior:'smooth', block:'center'}); toast(`Kick-off ${t}. Press Save changes to confirm`); } },
   'avail-off': async v => { await pullOut(v); delete S.plus[v]; await reload(); },
   'host-add': async v => { const pid = val('hostAdd'); if (!pid) return;
     await API.setAvail({ player:pid, token:null, day:v, on:true }); toast('Added'); await reload(); },
@@ -837,12 +907,14 @@ const H = {
     await API.clearAvail(pid, day); toast('Removed'); await reload(); },
   'sess-save': async v => {
     const p = { ...sessionOn(v), day:v, ...readSessionFields() };
-    if (!p.kickoff) return toast('Add a kick-off time', true);
+    if (!p.window_start || !p.window_end) return toast('Add the times you\'re free', true);
+    if (p.time_set && hm(p.kickoff) + p.hours > hm(p.window_end) + 1e-9) { if (!(await ask(`That kick-off runs past your window (${p.window_end}). Save anyway?`, 'Save'))) return; }
     const c = val('f_confirm'); if (c) p.confirm_by = new Date(c).toISOString();
     delete p.status; delete p.teams;
     await API.upsertSession(p); toast('Game updated'); await reload(); },
   'sess-status': async v => {
     const [day, status] = v.split('|');
+    if (status === 'booked' && !timeSet(sessionOn(day))) return toast('Set the kick-off time first, then mark it booked', true);
     if (status === 'booked' && !(await ask(`Mark ${fmtShort(day)} as booked? From now on anyone in the squad who pulls out still pays their share.`, 'Mark booked'))) return;
     const p = { ...sessionOn(day), status }; delete p.teams;
     await API.upsertSession(p); toast(status === 'booked' ? 'Marked as booked ⚽' : 'Back to proposed'); await reload(); },
@@ -850,11 +922,12 @@ const H = {
   'propose-day': v => { S.proposeMode = true; S.picks = new Set([v]); render(); },
   'propose-clear': () => { S.picks.clear(); render(); },
   'propose-save': async () => {
-    const f = readSessionFields(); if (!f.kickoff) return toast('Add a kick-off time', true);
+    const f = readSessionFields(); if (!f.window_start || !f.window_end) return toast('Add the times you\'re free', true);
+    if (hm(f.window_end) - hm(f.window_start) < f.hours) return toast('The window is shorter than the game', true);
     const days = [...S.picks].sort();
     for (const day of days){
       const ex = sessionOn(day);
-      await API.upsertSession({ ...f, day, confirm_by: ex?.confirm_by || defaultConfirmBy(day, f.kickoff).toISOString(), ...(ex ? {} : { status:'proposed' }) });
+      await API.upsertSession({ ...f, day, confirm_by: ex?.confirm_by || defaultConfirmBy(day, f.window_start).toISOString(), ...(ex ? {} : { status:'proposed' }) });
     }
     toast(`Proposed ${days.length} ${days.length === 1 ? 'game' : 'games'}`);
     S.proposeMode = false; S.picks.clear(); S.sel = days[0]; await reload(); },
@@ -907,7 +980,7 @@ const H = {
     await API.setGroupPassword(pw); S.groupPwHost = pw; toast(pw ? 'Group password set' : 'Group password removed'); await reload(); },
   'settings-save': async () => {
     const g = id => val('st_' + id);
-    const p = { group_name:g('group_name') || 'Football', default_kickoff:g('default_kickoff') || '19:00', default_hours:Number(g('default_hours')) || 1,
+    const p = { group_name:g('group_name') || 'Football', default_kickoff:g('default_kickoff') || '19:00', default_window_end:g('default_window_end') || '22:00', default_hours:Number(g('default_hours')) || 1,
       book_days_before:Math.max(0, parseInt(g('book_days_before')) || 0), min_players:Math.max(0, parseInt(g('min_players')) || 0), price_total:Number(g('price_total')) || 0, price_per_head:Number(g('price_per_head')) || 0,
       cap:Math.max(2, parseInt(g('cap')) || 14), format:parseInt(g('format')) || 7, location_name:g('location_name'), location_address:g('location_address'),
       location_url:g('location_url'), notes:g('notes'), bank_name:g('bank_name'), bank_sort:g('bank_sort'), bank_account:g('bank_account'), bank_ref:g('bank_ref') };
