@@ -53,6 +53,16 @@ h4{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.6px
 .cell .ball{position:absolute;top:3px;right:5px;font-size:12px}
 .cell.mine::after{content:"";position:absolute;left:6px;bottom:6px;width:8px;height:8px;border-radius:50%;background:#fff}
 .cell.mine.late::after{background:var(--bad)}
+.cell.nosess{opacity:.55}
+.cell.proposed{box-shadow:inset 0 0 0 2px var(--warn)}
+.cell.booked{box-shadow:inset 0 0 0 2px var(--accent)}
+.cell.picked{border-color:var(--warn);background:#3a2f12;opacity:1}
+.cell .ball{font-weight:700;color:var(--warn)}
+.sw-prop{border:2px dashed var(--warn)} .sw-book{border:2px solid var(--accent)}
+.prog{margin-bottom:12px}.bar{position:relative;height:8px;background:var(--card2);border-radius:99px;margin-bottom:4px}
+.bar i{display:block;height:100%;border-radius:99px}.bar b{position:absolute;top:-3px;width:2px;height:14px;background:var(--text)}
+input[type=datetime-local]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;color-scheme:dark}
+input[type=time]{color-scheme:dark}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .sw{width:14px;height:14px;border-radius:4px;display:inline-block}
@@ -189,7 +199,7 @@ const S = {
   me: null, isHost:false, hostKey: qs.get('host') || (()=>{ try { return localStorage.getItem('fb_host'); } catch { return null; } })(),
   groupPwRequired:false, groupPw:'',
   tab:'cal', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-  sel:null, quick:false, plus:{}, prof:null, teamsDraft:{}, pick:null,
+  sel:null, quick:false, proposeMode:false, picks:new Set(), plus:{}, prof:null, teamsDraft:{}, pick:null,
 };
 try { S.me = JSON.parse(localStorage.getItem('fb_me') || 'null'); } catch {}
 if (qs.get('me')) {
@@ -251,7 +261,7 @@ const Mock = (() => {
   let seedN = 7; const rnd = () => (seedN = (seedN * 9301 + 49297) % 233280) / 233280;
   function seed(){
     const settings = { id:1, group_name:'Weekly 7-a-side', default_kickoff:'19:00:00', default_hours:1, price_total:84, price_per_head:6,
-      free_cancel_hours:48, location_name:'Demo Sports Centre, Pitch 2', location_address:'1 Example Road, London',
+      free_cancel_hours:48, book_days_before:7, min_players:10, location_name:'Demo Sports Centre, Pitch 2', location_address:'1 Example Road, London',
       location_url:'', cap:14, format:7, bank_name:'Your Name', bank_sort:'00-00-00', bank_account:'12345678', bank_ref:'Football + your name', notes:'Bring a dark and a light top.' };
     const names = ['Adam','Bilal','Chris','Dan','Ehsan','Femi','George','Hamza','Imran','Jack','Kofi','Luke','Musa','Nabil','Omar','Sam'];
     const players = names.map((name,i) => {
@@ -267,8 +277,13 @@ const Mock = (() => {
       players.forEach((pl, i) => { if (rnd() < p) avail.push({ player_id:pl.id, day, plus_ones: rnd() < .08 ? 1 : 0, plus_one_names:'', plus_one_skill:3, status:'available',
         created_at:new Date(Date.now() - 1e8 + i*1e5 + d*1e3).toISOString(), dropped_at:null, paid:false, waived:false }); });
     }
-    const sessions = [{ day:sessDay, kickoff:'19:00:00', hours:1, price_total:84, price_per_head:6, free_cancel_hours:48,
-      location_name:settings.location_name, location_address:settings.location_address, location_url:'', cap:14, format:7, notes:settings.notes, teams:null }];
+    const base = { kickoff:'19:00:00', hours:1, price_total:84, price_per_head:6, free_cancel_hours:48, min_players:10,
+      location_name:settings.location_name, location_address:settings.location_address, location_url:'', cap:14, format:7, notes:settings.notes, teams:null };
+    const propDay = iso(addDays(new Date(), 12));
+    const sessions = [{ ...base, day:sessDay, status:'booked', confirm_by:addDays(new Date(), -2).toISOString() },
+                      { ...base, day:propDay, status:'proposed', confirm_by:addDays(new Date(), 4).toISOString() }].sort((a,b)=>a.day<b.day?-1:1);
+    const live = new Set(sessions.map(s => s.day));
+    for (let i = avail.length - 1; i >= 0; i--) if (!live.has(avail[i].day)) avail.splice(i, 1);
     return { hostKey:'demo', groupPw:'', settings, players, avail, sessions };
   }
   let db; try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch {}
@@ -302,8 +317,11 @@ const Mock = (() => {
       if (!p) throw new Error('Not allowed');
       if (o.day < todayISO()) throw new Error('That day has already passed');
       const sess = db.sessions.find(s => s.day === o.day);
+      if (o.on && !sess && !isHost(hk())) throw new Error('No game has been proposed for that day');
       if (sess && new Date() >= kickoffDate(sess)) throw new Error('This session has already kicked off');
       let row = db.avail.find(a => a.player_id === o.player && a.day === o.day);
+      if (o.on && !row && sess && sess.status !== 'booked' && sess.confirm_by && new Date() >= new Date(sess.confirm_by) && !isHost(hk()))
+        throw new Error('Confirmations for this day have closed. Ask the host to add you');
       if (o.on){
         const vals = { plus_ones:Math.max(0,Math.min(5,o.plus||0)), plus_one_names:o.plusNames||'', plus_one_skill:o.plusSkill||3 };
         if (!row) db.avail.push({ player_id:o.player, day:o.day, ...vals, status:'available', created_at:new Date().toISOString(), dropped_at:null, paid:false, waived:false });
@@ -312,7 +330,7 @@ const Mock = (() => {
       }
       if (!row) return 'removed';
       if (row.status === 'late_drop') return 'late_drop';
-      if (sess && new Date() >= cancelDeadline(sess)){
+      if (sess && sess.status === 'booked'){
         const sq = squadOf(db.avail.filter(a => a.day === o.day), sess.cap);
         if (sq.inS.includes(row)){ row.status = 'late_drop'; row.dropped_at = new Date().toISOString(); save(); return 'late_drop'; }
       }
@@ -320,9 +338,9 @@ const Mock = (() => {
     },
     async saveSettings(p){ host(hk()); Object.assign(db.settings, p, {id:1}); save(); },
     async upsertSession(p){ host(hk()); const s = db.sessions.find(s => s.day === p.day);
-      if (s) Object.assign(s, p); else db.sessions.push({ ...p, teams:null }); db.sessions.sort((a,b)=>a.day<b.day?-1:1); save(); },
+      if (s) Object.assign(s, p); else db.sessions.push({ status:'proposed', ...p, teams:null }); db.sessions.sort((a,b)=>a.day<b.day?-1:1); save(); },
     async cancelSession(day){ host(hk()); db.sessions = db.sessions.filter(s => s.day !== day);
-      db.avail.forEach(a => { if (a.day === day && a.status === 'late_drop'){ a.status = 'available'; a.dropped_at = null; } }); save(); },
+      db.avail = db.avail.filter(a => a.day !== day); save(); },
     async saveTeams(day, teams){ host(hk()); const s = db.sessions.find(s => s.day === day); if (s) s.teams = teams; save(); },
     async setPayment(player, day, paid, waived){ host(hk()); const r = db.avail.find(a => a.player_id === player && a.day === day);
       if (r){ if (paid !== null) r.paid = paid; if (waived !== null) r.waived = waived; } save(); },
@@ -369,31 +387,59 @@ function heatLevel(heads, cap){
   return r >= 1 ? 4 : r >= 2/3 ? 3 : r >= 1/3 ? 2 : 1;
 }
 
+const isBooked = s => !!s && s.status === 'booked';
+const confirmBy = s => s && s.confirm_by ? new Date(s.confirm_by) : null;
+const confirmsClosed = s => !!s && !isBooked(s) && !!confirmBy(s) && new Date() >= confirmBy(s);
+const toLocalInput = d => `${iso(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// Default confirm-by: 11pm the night before pitch slots open (slots open at midnight, N days before)
+function defaultConfirmBy(day, kickoff){
+  const d = parseISO(day); d.setDate(d.getDate() - Number(S.settings.book_days_before ?? 7));
+  let c = new Date(d.getTime() - 3600e3);
+  const ko = new Date(`${day}T${fmtTime(kickoff || S.settings.default_kickoff)}:00`);
+  if (c <= new Date()) c = new Date(ko.getTime() - 24*3600e3);
+  if (c <= new Date()) c = new Date(ko.getTime() - 3600e3);
+  return c;
+}
+
 function viewCal(){
   const m = S.month, y = m.getFullYear(), mo = m.getMonth();
   const offset = (new Date(y,mo,1).getDay() + 6) % 7;
   const n = new Date(y,mo+1,0).getDate();
   const t = todayISO();
+  const proposing = S.isHost && S.proposeMode;
   let cells = '';
   for (let i = 0; i < offset; i++) cells += '<div class="cell empty"></div>';
   for (let d = 1; d <= n; d++){
     const day = iso(new Date(y,mo,d));
-    const sq = squad(day), sess = sessionOn(day), mine = myRow(day);
-    const cls = ['cell', 'h' + heatLevel(sq.total, sq.cap), day < t ? 'past' : '', day === t ? 'today' : '', S.sel === day ? 'sel' : '', sess ? 'sess' : '',
+    const sess = sessionOn(day), sq = squad(day), mine = myRow(day);
+    const heads = sess ? sq.total : 0;
+    const cls = ['cell', 'h' + heatLevel(heads, sq.cap), day < t ? 'past' : '', day === t ? 'today' : '', S.sel === day && !proposing ? 'sel' : '',
+                 sess ? (isBooked(sess) ? 'sess booked' : 'sess proposed') : 'nosess', proposing && S.picks.has(day) ? 'picked' : '',
                  mine ? (mine.status === 'late_drop' ? 'mine late' : 'mine') : ''].join(' ');
-    cells += `<button class="${cls}" data-act="day" data-v="${day}" aria-label="${fmtDay(day)}, ${sq.total} available">
-      <span class="dn">${d}</span>${sess ? '<span class="ball">⚽</span>' : ''}${sq.total ? `<span class="cnt">${sq.total}</span>` : ''}</button>`;
+    cells += `<button class="${cls}" data-act="day" data-v="${day}" aria-label="${fmtDay(day)}${sess ? (isBooked(sess) ? ', booked' : ', proposed') + `, ${heads} in` : ''}">
+      <span class="dn">${d}</span>${sess ? `<span class="ball">${isBooked(sess) ? '⚽' : '?'}</span>` : ''}${heads ? `<span class="cnt">${heads}</span>` : ''}</button>`;
   }
   const cap = S.settings.cap, a = Math.ceil(cap/3), b = Math.ceil(cap*2/3);
   const legend = `<div class="legend">
-    <span><i class="sw" style="background:var(--h1)"></i>1–${a-1}</span>
+    <span><i class="sw sw-prop"></i>proposed</span><span><i class="sw sw-book"></i>⚽ pitch booked</span>
+    <span><i class="sw" style="background:var(--h1)"></i>1–${a-1} in</span>
     <span><i class="sw" style="background:var(--h2)"></i>${a}–${b-1}</span>
     <span><i class="sw" style="background:var(--h3)"></i>${b}–${cap-1}</span>
-    <span><i class="sw" style="background:var(--h4)"></i>${cap}+ (full squad)</span>
-    <span>⚽ booked session</span><span>● you're free</span></div>`;
-  const top = S.me
-    ? `<label class="quick"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark: tap days to toggle when you're free</label>`
-    : `<div class="note">Join first so you can mark the days you're free. <button class="btn primary" data-act="tab" data-v="me">Join</button></div>`;
+    <span><i class="sw" style="background:var(--h4)"></i>${cap}+ full</span>
+    <span>● you're in</span></div>`;
+  let top;
+  if (S.isHost){
+    top = proposing
+      ? `<div class="quick" style="justify-content:space-between"><span><b>Propose days:</b> tap the days you can do. ${S.picks.size} selected</span><button class="btn" data-act="propose-mode" data-v="0">Done</button></div>`
+      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="propose-mode" data-v="1">+ Propose days</button>${S.me ? `<label class="small muted"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark myself in/out</label>` : ''}</div>`;
+  } else if (S.me){
+    top = `<label class="quick"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mode: tap a proposed day to say you're in or out</label>`;
+  } else {
+    top = `<div class="note">Join first so you can say which games you're in for. <button class="btn primary" data-act="tab" data-v="me">Join</button></div>`;
+  }
+  const right = proposing ? proposeForm()
+    : S.sel ? viewDay(S.sel)
+    : `<p class="hint">${S.sessions.some(s => s.day >= t) ? 'Tap a highlighted day to see the game and who\'s in.' : (S.isHost ? 'Tap "Propose days" to put some games out.' : 'No games proposed yet. Check back soon.')}</p>`;
   return `<div class="layout"><section>
       ${top}
       <div class="calhead"><button data-act="month" data-v="-1" aria-label="Previous month">‹</button>
@@ -402,7 +448,7 @@ function viewCal(){
       <div class="dow">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div>${d}</div>`).join('')}</div>
       <div class="grid">${cells}</div>${legend}
     </section>
-    <section id="dayPanel">${S.sel ? viewDay(S.sel) : '<p class="hint">Tap a day to see who\'s free.</p>'}</section></div>`;
+    <section id="dayPanel">${right}</section></div>`;
 }
 
 function personLine(r, tag, host){
@@ -413,35 +459,51 @@ function personLine(r, tag, host){
     <div class="row">${tag || ''}${host ? `<button class="btn small danger" title="Remove from this day (no charge)" data-act="host-clear" data-v="${r.player_id}|${r.day}">✕</button>` : ''}</div></div>`;
 }
 
+function statusLine(s){
+  if (isBooked(s)) return `<span class="tag in">⚽ Pitch booked</span>`;
+  const c = confirmBy(s);
+  if (!c) return `<span class="tag wait">Proposed</span>`;
+  return confirmsClosed(s)
+    ? `<span class="tag wait">Proposed · confirmations closed ${fmtDT(c)}</span>`
+    : `<span class="tag wait">Proposed · confirm by ${fmtDT(c)}</span>`;
+}
+function progressBar(s, sq){
+  const max = Math.max(sq.cap, 1), pct = Math.min(100, sq.heads / max * 100), minPct = Math.min(100, (s.min_players || 0) / max * 100);
+  const ok = sq.heads >= (s.min_players || 0);
+  return `<div class="prog"><div class="bar"><i style="width:${pct}%;background:${ok ? 'var(--accent)' : 'var(--warn)'}"></i>${s.min_players ? `<b style="left:${minPct}%"></b>` : ''}</div>
+    <div class="small muted">${sq.heads} in${s.min_players ? ` · need ${s.min_players} to go ahead` : ''} · max ${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</div></div>`;
+}
+
 function sessionInfo(s){
   const link = mapLink(s);
   return `<div class="info">
     <b>When</b><span>${fmtTime(s.kickoff)}–${endDate(s).toTimeString().slice(0,5)} (${Number(s.hours)}h)</span>
     <b>Where</b><span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(s.location_name || s.location_address || 'Map')}</a>` : esc(s.location_name)}${s.location_address ? '<br><span class="muted small">' + esc(s.location_address) + '</span>' : ''}</span>
     <b>Price</b><span>${money(s.price_per_head)} each${Number(s.price_total) ? ` <span class="muted small">(pitch ${money(s.price_total)})</span>` : ''}</span>
-    <b>Pull out</b><span>Free until ${fmtDT(cancelDeadline(s))}<br><span class="muted small">After that you still pay your share</span></span>
+    <b>Pull out</b><span>${isBooked(s) ? 'The pitch is booked, so pulling out now means you still pay your share' : 'Free until the pitch is booked. After that you still pay your share'}</span>
     <b>Format</b><span>${s.format}-a-side, max ${s.cap}</span>
     ${s.notes ? `<b>Notes</b><span>${esc(s.notes)}</span>` : ''}</div>`;
 }
 
 function myControls(day, sess, sq){
   const r = myRow(day);
-  const per = sess ? Number(sess.price_per_head) : 0;
+  const per = Number(sess.price_per_head);
   if (r && r.status === 'late_drop'){
-    return `<div class="mine-box"><b>You pulled out late.</b> You still owe ${money(per*(1+r.plus_ones))}${r.waived ? ' (waived by host)' : ''}.
+    return `<div class="mine-box"><b>You pulled out after the pitch was booked.</b> You still owe ${money(per*(1+r.plus_ones))}${r.waived ? ' (waived by host)' : ''}.
       <div style="margin-top:10px"><button class="btn" data-act="avail-on" data-v="${day}">I can play after all</button></div></div>`;
+  }
+  if (!r && confirmsClosed(sess) && !S.isHost){
+    return `<div class="mine-box">Confirmations for this game have closed. Ask the host if you still want to play.</div>`;
   }
   let status = '';
   if (r){
-    if (sess){
-      const wi = sq.wait.indexOf(r);
-      status = wi >= 0 ? `<span class="tag wait">Waitlist #${wi+1}</span>` : `<span class="tag in">You're in the squad</span>`;
-    } else status = `<span class="tag in">You're marked free</span>`;
+    const wi = sq.wait.indexOf(r);
+    status = wi >= 0 ? `<span class="tag wait">Waitlist #${wi+1}</span>` : `<span class="tag in">You're in</span>`;
   }
   const n = S.plus[day] ?? (r ? r.plus_ones : 0);
   return `<div class="mine-box">
-    ${r ? `<div class="row" style="justify-content:space-between;margin-bottom:10px">${status}<button class="btn danger" data-act="avail-off" data-v="${day}">${sess ? 'Pull out' : "I'm not free"}</button></div>`
-        : `<button class="btn primary big" data-act="avail-on" data-v="${day}">${sess ? "I'm in" : "I'm free this day"}</button>`}
+    ${r ? `<div class="row" style="justify-content:space-between;margin-bottom:10px">${status}<button class="btn danger" data-act="avail-off" data-v="${day}">Pull out</button></div>`
+        : `<button class="btn primary big" data-act="avail-on" data-v="${day}">I'm in</button>`}
     <div class="row" style="margin-top:10px"><span class="small muted">Bringing a +1?</span>
       <div class="stepper"><button data-act="plus" data-v="-1" aria-label="Fewer">−</button><span id="plusN">${n}</span><button data-act="plus" data-v="1" aria-label="More">+</button></div></div>
     <div id="plusMore">
@@ -457,30 +519,58 @@ function syncPlusUI(){
   if (el && n) el.style.display = Number(n.textContent) > 0 ? '' : 'none';
 }
 
-function hostDayForm(day, sess){
-  const d = sess || { kickoff:S.settings.default_kickoff, hours:S.settings.default_hours, price_total:S.settings.price_total, price_per_head:S.settings.price_per_head,
-    free_cancel_hours:S.settings.free_cancel_hours, location_name:S.settings.location_name, location_address:S.settings.location_address,
-    location_url:S.settings.location_url, cap:S.settings.cap, format:S.settings.format, notes:S.settings.notes };
-  const notOn = S.players.filter(p => !dayRows(day).some(r => r.player_id === p.id));
-  return `<h4>Host</h4>
-    ${notOn.length ? `<div class="row"><select id="hostAdd" style="flex:1">${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
-      <button class="btn" data-act="host-add" data-v="${day}">Add to this day</button></div>` : ''}
-    <h4>${sess ? 'Edit booked session' : 'Book a session on this day'}</h4>
-    <div class="grid3">
+// Shared fields for proposing and editing a game
+function sessionFields(d, withConfirm){
+  return `<div class="grid3">
       <div><label class="f">Kick-off</label><input type="time" id="f_kickoff" value="${fmtTime(d.kickoff)}"></div>
       <div><label class="f">Hours</label><input type="number" step="0.5" min="0.5" id="f_hours" value="${Number(d.hours)}"></div>
-      <div><label class="f">Free pull-out until (hrs before)</label><input type="number" min="0" id="f_cancel" value="${d.free_cancel_hours}"></div>
+      <div><label class="f">Min players to go ahead</label><input type="number" min="0" id="f_min" value="${d.min_players}"></div>
       <div><label class="f">Pitch total £</label><input type="number" step="0.01" min="0" id="f_total" value="${Number(d.price_total)}"></div>
       <div><label class="f">Per head £</label><input type="number" step="0.01" min="0" id="f_head" value="${Number(d.price_per_head)}"></div>
       <div><label class="f">Max players</label><input type="number" min="2" id="f_cap" value="${d.cap}"></div>
     </div>
+    ${withConfirm ? `<label class="f">Friends confirm by</label><input type="datetime-local" id="f_confirm" value="${esc(d.confirm_local)}">` : ''}
     <label class="f">Format (a-side)</label><input type="number" min="3" max="11" id="f_format" value="${d.format}">
     <label class="f">Pitch / venue name</label><input type="text" id="f_lname" value="${esc(d.location_name)}">
     <label class="f">Address</label><input type="text" id="f_laddr" value="${esc(d.location_address)}">
     <label class="f">Map link (optional, otherwise made from the address)</label><input type="url" id="f_lurl" value="${esc(d.location_url)}">
-    <label class="f">Notes for players</label><textarea id="f_notes">${esc(d.notes)}</textarea>
-    <div class="row" style="margin-top:12px"><button class="btn primary" data-act="sess-save" data-v="${day}">${sess ? 'Save changes' : 'Book this day'}</button>
-      ${sess ? `<button class="btn danger" data-act="sess-cancel" data-v="${day}">Cancel session</button>` : ''}</div>`;
+    <label class="f">Notes for players</label><textarea id="f_notes">${esc(d.notes)}</textarea>`;
+}
+function readSessionFields(){
+  return { kickoff:val('f_kickoff'), hours:Number(val('f_hours'))||1, min_players:Math.max(0, parseInt(val('f_min'))||0),
+    price_total:Number(val('f_total'))||0, price_per_head:Number(val('f_head'))||0, cap:Math.max(2, parseInt(val('f_cap'))||14),
+    format:parseInt(val('f_format'))||7, location_name:val('f_lname'), location_address:val('f_laddr'), location_url:val('f_lurl'), notes:val('f_notes') };
+}
+const settingsDefaults = () => ({ kickoff:S.settings.default_kickoff, hours:S.settings.default_hours, min_players:S.settings.min_players ?? 10,
+  price_total:S.settings.price_total, price_per_head:S.settings.price_per_head, cap:S.settings.cap, format:S.settings.format,
+  location_name:S.settings.location_name, location_address:S.settings.location_address, location_url:S.settings.location_url, notes:S.settings.notes });
+
+function proposeForm(){
+  const days = [...S.picks].sort();
+  const t = todayISO();
+  let h = `<div class="panel"><h3>Propose games</h3>`;
+  if (!days.length) return h + `<p class="muted">Tap the days you can do on the calendar. You can pick as many as you like.</p></div>`;
+  h += `<div class="row" style="margin-bottom:6px">${days.map(d => `<span class="chip can" style="font-size:13px">${fmtShort(d)}${sessionOn(d) ? ' (update)' : ''}</span>`).join('')}</div>
+    <p class="muted small">Friends confirm by <b>11pm the night before slots open</b> (${Number(S.settings.book_days_before ?? 7)} days before, change this in Host setup). For the first one that's ${fmtDT(defaultConfirmBy(days[0]))}. You can tweak each day after.</p>`;
+  h += sessionFields(settingsDefaults(), false);
+  h += `<div class="row" style="margin-top:12px"><button class="btn primary" data-act="propose-save">Propose ${days.length} ${days.length === 1 ? 'game' : 'games'}</button>
+    <button class="btn" data-act="propose-clear">Clear selection</button></div></div>`;
+  return h;
+}
+
+function hostDayForm(day, sess){
+  const notOn = S.players.filter(p => !dayRows(day).some(r => r.player_id === p.id));
+  const d = { ...sess, confirm_local: confirmBy(sess) ? toLocalInput(confirmBy(sess)) : toLocalInput(defaultConfirmBy(day, sess.kickoff)) };
+  return `<h4>Host</h4>
+    <div class="row">${isBooked(sess)
+      ? `<button class="btn" data-act="sess-status" data-v="${day}|proposed">Undo booked</button>`
+      : `<button class="btn primary" data-act="sess-status" data-v="${day}|booked">⚽ Mark pitch as booked</button>`}</div>
+    ${notOn.length ? `<div class="row" style="margin-top:10px"><select id="hostAdd" style="flex:1">${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <button class="btn" data-act="host-add" data-v="${day}">Add to this game</button></div>` : ''}
+    <h4>Edit game</h4>
+    ${sessionFields(d, !isBooked(sess))}
+    <div class="row" style="margin-top:12px"><button class="btn primary" data-act="sess-save" data-v="${day}">Save changes</button>
+      <button class="btn danger" data-act="sess-cancel" data-v="${day}">Cancel game</button></div>`;
 }
 
 function viewDay(day){
@@ -488,17 +578,16 @@ function viewDay(day){
   const past = day < todayISO(), started = sess && new Date() >= kickoffDate(sess);
   const host = S.isHost && !past;
   let h = `<div class="panel"><h3>${fmtDay(day)}</h3>`;
-  if (sess) h += sessionInfo(sess);
-  else if (!past) h += `<p class="muted small" style="margin:0">Not booked yet. Mark yourself free and the host will pick the best day.</p>`;
-  if (S.me && !past && !started) h += myControls(day, sess, sq);
-  if (sess){
-    h += `<h4>In the squad · ${sq.heads}/${sq.cap}</h4>` + (sq.inS.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
-    if (sq.wait.length) h += `<h4>Waitlist</h4>` + sq.wait.map((r,i) => personLine(r, `<span class="tag wait">#${i+1}</span>`, host)).join('');
-    if (sq.late.length) h += `<h4>Pulled out late</h4>` + sq.late.map(r => personLine(r, '<span class="tag late">owes</span>', host)).join('');
-  } else {
-    const rows = sq.inS.concat(sq.wait);
-    h += `<h4>Free this day · ${sq.total} ${sq.total === 1 ? 'person' : 'people'}</h4>` + (rows.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
+  if (!sess){
+    h += `<p class="muted" style="margin:0">${past ? 'No game this day.' : 'No game proposed for this day.'}</p>`;
+    if (host) h += `<div style="margin-top:12px"><button class="btn primary" data-act="propose-day" data-v="${day}">Propose a game this day</button></div>`;
+    return h + '</div>';
   }
+  h += `<div style="margin-bottom:10px">${statusLine(sess)}</div>${progressBar(sess, sq)}${sessionInfo(sess)}`;
+  if (S.me && !past && !started) h += myControls(day, sess, sq);
+  h += `<h4>In · ${sq.heads}/${sq.cap}</h4>` + (sq.inS.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
+  if (sq.wait.length) h += `<h4>Waitlist</h4>` + sq.wait.map((r,i) => personLine(r, `<span class="tag wait">#${i+1}</span>`, host)).join('');
+  if (sq.late.length) h += `<h4>Pulled out after booking</h4>` + sq.late.map(r => personLine(r, '<span class="tag late">owes</span>', host)).join('');
   if (host) h += hostDayForm(day, sess);
   return h + '</div>';
 }
@@ -600,17 +689,17 @@ function sessionCard(s){
   let mine = '';
   if (r && !S.isHost){
     const inS = sq.inS.includes(r), late = r.status === 'late_drop', wi = sq.wait.indexOf(r);
-    const owe = (inS || late) ? owesFor(r, s) : 0;
-    mine = `<div class="mine-box">${inS ? '<span class="tag in">You\'re in</span>' : late ? '<span class="tag late">Pulled out late</span>' : `<span class="tag wait">Waitlist #${wi+1}</span>`}
+    const owe = ((inS && isBooked(s)) || late) ? owesFor(r, s) : 0;
+    mine = `<div class="mine-box">${inS ? '<span class="tag in">You\'re in</span>' : late ? '<span class="tag late">Pulled out after booking</span>' : `<span class="tag wait">Waitlist #${wi+1}</span>`}
       ${owe ? ` Your share ${money(owe)} · ${r.paid ? '<b style="color:var(--accent)">paid ✓</b>' : '<b>not paid yet</b>'}` : ''}
       ${owe && !r.paid ? bankBox() : ''}</div>`;
   } else if (S.me && !S.isHost && s.day >= todayISO()){
-    mine = `<div class="mine-box">You're not down for this one. <button class="btn" data-act="goto" data-v="${s.day}">Open day</button></div>`;
+    mine = confirmsClosed(s) ? '' : `<div class="mine-box">You're not down for this one. <button class="btn primary" data-act="goto" data-v="${s.day}">Open game</button></div>`;
   }
   const names = sq.inS.map(r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; }).join(', ');
-  return `<div class="card"><h3>${fmtDay(s.day)}</h3>${sessionInfo(s)}${mine}
-    <h4>Squad · ${sq.heads}/${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</h4><p style="margin:0">${names || '<span class="muted">Nobody yet</span>'}</p>
-    ${S.isHost ? paymentsBlock(s, sq) : ''}${teamsBlock(s)}
+  return `<div class="card"><h3>${fmtDay(s.day)}</h3><div style="margin-bottom:10px">${statusLine(s)}</div>${progressBar(s, sq)}${sessionInfo(s)}${mine}
+    <h4>In · ${sq.heads}/${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</h4><p style="margin:0">${names || '<span class="muted">Nobody yet</span>'}</p>
+    ${S.isHost && isBooked(s) ? paymentsBlock(s, sq) : ''}${teamsBlock(s)}
     ${S.isHost ? `<div style="margin-top:12px"><button class="btn" data-act="goto" data-v="${s.day}">Edit in calendar</button></div>` : ''}</div>`;
 }
 
@@ -618,8 +707,9 @@ function viewSessions(){
   const t = todayISO();
   const up = S.sessions.filter(s => s.day >= t);
   let past = S.sessions.filter(s => s.day < t).reverse();
+  past = past.filter(s => isBooked(s));
   if (!S.isHost) past = past.filter(s => { const r = myRow(s.day); if (!r || r.paid) return false; const sq = squad(s.day); return (sq.inS.includes(r) || r.status === 'late_drop') && owesFor(r, s) > 0; });
-  return (up.length ? up.map(sessionCard).join('') : `<div class="note">No sessions booked yet. ${S.isHost ? 'Pick a day on the calendar and book it.' : 'Mark the days you\'re free on the calendar.'}</div>`)
+  return (up.length ? up.map(sessionCard).join('') : `<div class="note">No games proposed yet. ${S.isHost ? 'Go to the calendar and tap "Propose days".' : 'Check back soon.'}</div>`)
     + (past.length ? `<h4>${S.isHost ? 'Recent sessions' : 'Still to pay'}</h4>` + past.map(sessionCard).join('') : '');
 }
 
@@ -668,17 +758,17 @@ function viewSetup(){
     <div class="linkbox"><input type="text" id="st_group_pw" value="${esc(S.groupPwHost ?? '')}" placeholder="${S.groupPwHost === undefined ? 'Loading…' : 'No password'}"><button class="btn" data-act="group-pw-save">Save</button></div>
     <label class="f">Change your host password (at least 8 characters)</label>
     <div class="linkbox"><input type="password" id="st_host_pw" autocomplete="new-password"><button class="btn" data-act="host-pw-save">Change</button></div></div>
-  <div class="card"><h3>Default session details</h3><p class="muted small" style="margin-top:0">Pre-filled whenever you book a day. You can still change them per session.</p>
+  <div class="card"><h3>Default session details</h3><p class="muted small" style="margin-top:0">Pre-filled whenever you propose games. You can still change them per game. Friends must confirm by 11pm the night before pitch slots open.</p>
     ${field('group_name','Group name',st.group_name)}
     <div class="grid3">
       ${field('default_kickoff','Kick-off',fmtTime(st.default_kickoff),'time')}
       ${field('default_hours','Hours',Number(st.default_hours),'number','step="0.5" min="0.5"')}
-      ${field('free_cancel_hours','Free pull-out until (hrs before)',st.free_cancel_hours,'number','min="0"')}
+      ${field('book_days_before','Pitch slots open (days before)',st.book_days_before ?? 7,'number','min="0"')}
       ${field('price_total','Pitch total £',Number(st.price_total),'number','step="0.01" min="0"')}
       ${field('price_per_head','Per head £',Number(st.price_per_head),'number','step="0.01" min="0"')}
       ${field('cap','Max players',st.cap,'number','min="2"')}
     </div>
-    ${field('format','Format (a-side)',st.format,'number','min="3" max="11"')}
+    <div class="grid2">${field('format','Format (a-side)',st.format,'number','min="3" max="11"')}${field('min_players','Min players to go ahead',st.min_players ?? 10,'number','min="0"')}</div>
     ${field('location_name','Pitch / venue name',st.location_name)}
     ${field('location_address','Address',st.location_address)}
     ${field('location_url','Map link (optional)',st.location_url,'url')}
@@ -705,12 +795,12 @@ async function pullOut(day){
   const sess = sessionOn(day), r = myRow(day);
   if (sess && r){
     const sq = squad(day);
-    if (sq.inS.includes(r) && new Date() >= cancelDeadline(sess)){
-      if (!(await ask(`It's within ${sess.free_cancel_hours} hours of kick-off, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`))) return;
+    if (sq.inS.includes(r) && isBooked(sess)){
+      if (!(await ask(`The pitch is already booked, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`, 'Pull out'))) return;
     } else if (!(await ask('Pull out of this session?'))) return;
   }
   const res = await API.setAvail({ player:S.me.id, token:S.me.token, day, on:false });
-  toast(res === 'late_drop' ? 'Pulled out. Late pull-out, so your share is still due' : 'Updated');
+  toast(res === 'late_drop' ? 'Pulled out. The pitch was booked, so your share is still due' : 'Pulled out');
 }
 
 const H = {
@@ -719,8 +809,13 @@ const H = {
   'goto': v => { S.tab = 'cal'; S.sel = v; const d = parseISO(v); S.month = new Date(d.getFullYear(), d.getMonth(), 1); render();
     document.getElementById('dayPanel')?.scrollIntoView({behavior:'smooth'}); },
   'day': async v => {
-    if (S.quick && S.me && v >= todayISO()){
+    if (S.isHost && S.proposeMode){
+      if (v < todayISO()) return toast('That day has passed', true);
+      S.picks.has(v) ? S.picks.delete(v) : S.picks.add(v); return render();
+    }
+    if (S.quick && S.me && v >= todayISO() && sessionOn(v)){
       const sess = sessionOn(v);
+      if (!myRow(v) && confirmsClosed(sess) && !S.isHost) return toast('Confirmations for that game have closed', true);
       if (sess && new Date() >= kickoffDate(sess)) return toast('That session has already kicked off', true);
       const r = myRow(v);
       if (r && r.status === 'available') await pullOut(v);
@@ -741,12 +836,29 @@ const H = {
     if (!(await ask(`Remove ${p?.name || 'this player'} from ${fmtShort(day)}? They won't be charged.`))) return;
     await API.clearAvail(pid, day); toast('Removed'); await reload(); },
   'sess-save': async v => {
-    const p = { day:v, kickoff:val('f_kickoff'), hours:Number(val('f_hours'))||1, price_total:Number(val('f_total'))||0, price_per_head:Number(val('f_head'))||0,
-      free_cancel_hours:Math.max(0, parseInt(val('f_cancel'))||0), cap:Math.max(2, parseInt(val('f_cap'))||14), format:parseInt(val('f_format'))||7,
-      location_name:val('f_lname'), location_address:val('f_laddr'), location_url:val('f_lurl'), notes:val('f_notes') };
+    const p = { ...sessionOn(v), day:v, ...readSessionFields() };
     if (!p.kickoff) return toast('Add a kick-off time', true);
-    await API.upsertSession(p); toast(sessionOn(v) ? 'Session updated' : 'Session booked'); await reload(); },
-  'sess-cancel': async v => { if (!(await ask(`Cancel the session on ${fmtShort(v)}? Late pull-out charges for it are cleared.`))) return;
+    const c = val('f_confirm'); if (c) p.confirm_by = new Date(c).toISOString();
+    delete p.status; delete p.teams;
+    await API.upsertSession(p); toast('Game updated'); await reload(); },
+  'sess-status': async v => {
+    const [day, status] = v.split('|');
+    if (status === 'booked' && !(await ask(`Mark ${fmtShort(day)} as booked? From now on anyone in the squad who pulls out still pays their share.`, 'Mark booked'))) return;
+    const p = { ...sessionOn(day), status }; delete p.teams;
+    await API.upsertSession(p); toast(status === 'booked' ? 'Marked as booked ⚽' : 'Back to proposed'); await reload(); },
+  'propose-mode': v => { S.proposeMode = v === '1'; if (!S.proposeMode) S.picks.clear(); render(); },
+  'propose-day': v => { S.proposeMode = true; S.picks = new Set([v]); render(); },
+  'propose-clear': () => { S.picks.clear(); render(); },
+  'propose-save': async () => {
+    const f = readSessionFields(); if (!f.kickoff) return toast('Add a kick-off time', true);
+    const days = [...S.picks].sort();
+    for (const day of days){
+      const ex = sessionOn(day);
+      await API.upsertSession({ ...f, day, confirm_by: ex?.confirm_by || defaultConfirmBy(day, f.kickoff).toISOString(), ...(ex ? {} : { status:'proposed' }) });
+    }
+    toast(`Proposed ${days.length} ${days.length === 1 ? 'game' : 'games'}`);
+    S.proposeMode = false; S.picks.clear(); S.sel = days[0]; await reload(); },
+  'sess-cancel': async v => { if (!(await ask(`Cancel the game on ${fmtShort(v)}? Everyone's responses and any pull-out charges for it are cleared.`, 'Cancel game'))) return;
     await API.cancelSession(v); delete S.teamsDraft[v]; toast('Session cancelled'); await reload(); },
   'teams-gen': v => { S.teamsDraft[v] = makeTeams(teamPool(v)); S.pick = null; render(); },
   'teams-discard': v => { delete S.teamsDraft[v]; S.pick = null; render(); },
@@ -796,7 +908,7 @@ const H = {
   'settings-save': async () => {
     const g = id => val('st_' + id);
     const p = { group_name:g('group_name') || 'Football', default_kickoff:g('default_kickoff') || '19:00', default_hours:Number(g('default_hours')) || 1,
-      free_cancel_hours:Math.max(0, parseInt(g('free_cancel_hours')) || 0), price_total:Number(g('price_total')) || 0, price_per_head:Number(g('price_per_head')) || 0,
+      book_days_before:Math.max(0, parseInt(g('book_days_before')) || 0), min_players:Math.max(0, parseInt(g('min_players')) || 0), price_total:Number(g('price_total')) || 0, price_per_head:Number(g('price_per_head')) || 0,
       cap:Math.max(2, parseInt(g('cap')) || 14), format:parseInt(g('format')) || 7, location_name:g('location_name'), location_address:g('location_address'),
       location_url:g('location_url'), notes:g('notes'), bank_name:g('bank_name'), bank_sort:g('bank_sort'), bank_account:g('bank_account'), bank_ref:g('bank_ref') };
     await API.saveSettings(p); toast('Defaults saved'); await reload(); },
