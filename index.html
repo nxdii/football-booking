@@ -458,7 +458,7 @@ function viewCal(){
   if (S.isHost){
     top = proposing
       ? `<div class="quick" style="justify-content:space-between"><span><b>Propose days:</b> tap the days you can do. ${S.picks.size} selected</span><button class="btn" data-act="propose-mode" data-v="0">Done</button></div>`
-      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="propose-mode" data-v="1">+ Propose days</button>${S.me ? `<label class="small muted"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark myself in/out</label>` : ''}</div>`;
+      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="propose-mode" data-v="1">+ Propose days</button>${S.me ? `<label class="small muted"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark myself in/out</label>` : `<button class="btn" data-act="tab" data-v="me">Join as a player too</button>`}</div>`;
   } else if (S.me){
     top = `<label class="quick"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mode: tap a proposed day to say you're in or out</label>`;
   } else {
@@ -928,8 +928,10 @@ const H = {
     for (const day of days){
       const ex = sessionOn(day);
       await API.upsertSession({ ...f, day, confirm_by: ex?.confirm_by || defaultConfirmBy(day, f.window_start).toISOString(), ...(ex ? {} : { status:'proposed' }) });
+      // The host plays too: put them in for their whole window
+      if (S.me && !myRow(day)) await API.setAvail({ player:S.me.id, token:S.me.token, day, on:true, slots:windowSlots({ ...f, day }) }).catch(() => {});
     }
-    toast(`Proposed ${days.length} ${days.length === 1 ? 'game' : 'games'}`);
+    toast(`Proposed ${days.length} ${days.length === 1 ? 'game' : 'games'}${S.me ? ' and put you in' : ''}`);
     S.proposeMode = false; S.picks.clear(); S.sel = days[0]; await reload(); },
   'sess-cancel': async v => { if (!(await ask(`Cancel the game on ${fmtShort(v)}? Everyone's responses and any pull-out charges for it are cleared.`, 'Cancel game'))) return;
     await API.cancelSession(v); delete S.teamsDraft[v]; toast('Session cancelled'); await reload(); },
