@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Football Booking</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#0c1410; --card:#132019; --card2:#1a2b22; --line:#25392e; --text:#e8f1ec; --muted:#8fa89a;
+  --accent:#3ddc84; --accent-ink:#04210f; --warn:#f2b84b; --bad:#ef6a6a;
+  --h0:#16241d; --h1:#1f4a33; --h2:#2a7046; --h3:#3a9a5b; --h4:#3ddc84;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:980px;margin:0 auto;padding:0 16px 80px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent)}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 0 10px}
+header h1{margin:0;font-size:22px;letter-spacing:-.3px}
+.role{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--card2);color:var(--muted);white-space:nowrap}
+.role.host{background:var(--warn);color:#2b1d00;font-weight:600}
+nav{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:16px}
+nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--muted);white-space:nowrap}
+nav button.on{background:var(--card2);color:var(--text);font-weight:600}
+.demo{background:#3a2f12;color:#f6dc9c;padding:8px 12px;border-radius:0 0 10px 10px;font-size:13px}
+.demo a{color:#ffe7a8}
+.card,.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.panel h3,.card h3{margin:0 0 10px;font-size:18px}
+h4{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.muted{color:var(--muted)} .small{font-size:13px}
+.btn{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 14px}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.danger{color:var(--bad)}
+.btn.big{width:100%;padding:13px;font-size:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.calhead h2{margin:0;font-size:18px}
+.calhead button{background:var(--card2);border:1px solid var(--line);border-radius:10px;width:40px;height:36px;font-size:20px}
+.dow,.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.dow div{text-align:center;font-size:12px;color:var(--muted);padding-bottom:2px}
+.cell{position:relative;aspect-ratio:1/1;min-height:44px;border-radius:10px;border:2px solid transparent;background:var(--h0);padding:4px 6px;text-align:left;display:flex;flex-direction:column;justify-content:space-between}
+.cell.empty{background:none;pointer-events:none}
+.cell.h1{background:var(--h1)} .cell.h2{background:var(--h2)} .cell.h3{background:var(--h3)} .cell.h4{background:var(--h4);color:var(--accent-ink)}
+.cell.past{opacity:.35}
+.cell.today .dn{text-decoration:underline;text-underline-offset:3px}
+.cell.sel{border-color:#fff}
+.cell.sess{box-shadow:inset 0 0 0 2px var(--warn)}
+.cell .dn{font-weight:600;font-size:14px}
+.cell .cnt{font-size:12px;align-self:flex-end;font-weight:600}
+.cell .ball{position:absolute;top:3px;right:5px;font-size:12px}
+.cell.mine::after{content:"";position:absolute;left:6px;bottom:6px;width:8px;height:8px;border-radius:50%;background:#fff}
+.cell.mine.late::after{background:var(--bad)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:14px;height:14px;border-radius:4px;display:inline-block}
+.quick{display:flex;gap:8px;align-items:center;margin:0 0 12px;font-size:14px;background:var(--card);border:1px solid var(--line);padding:10px 12px;border-radius:10px}
+.note{background:var(--card);border:1px dashed var(--line);padding:10px 12px;border-radius:10px;margin-bottom:12px}
+.layout{display:grid;gap:16px}
+@media(min-width:860px){.layout{grid-template-columns:1.1fr 1fr;align-items:start}}
+.person{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+.person:last-child{border-bottom:0}
+.pname{font-weight:600}
+.stars{color:var(--warn);font-size:12px;letter-spacing:1px}
+.chip{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;margin:1px 2px 1px 0;background:var(--card2);color:var(--muted)}
+.chip.can{background:#16432a;color:#9df0bf}
+.chip.cant{background:#4a1c1c;color:#f3a3a3;text-decoration:line-through}
+.tag{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--card2)}
+.tag.in{background:#16432a;color:#9df0bf} .tag.wait{background:#3a2f12;color:#f6dc9c} .tag.late{background:#4a1c1c;color:#f3a3a3}
+.mine-box{background:var(--card2);border-radius:12px;padding:12px;margin:10px 0 14px}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stepper button{background:var(--card);border:0;width:36px;height:34px;font-size:18px}
+.stepper span{min-width:34px;text-align:center;font-weight:600}
+label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input[type=text],input[type=number],input[type=time],input[type=url],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px}
+textarea{min-height:60px;resize:vertical}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px}
+@media(max-width:520px){.grid3{grid-template-columns:1fr 1fr}}
+.choice{display:flex;gap:6px;flex-wrap:wrap}
+.choice button{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.choice button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.choice button.can{background:#16432a;border-color:#2c7a4c;color:#c8f7da}
+.choice button.cant{background:#4a1c1c;border-color:#8a3434;color:#f6c2c2}
+.info{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
+.info b{color:var(--muted);font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:12px}
+.teams{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.team{background:var(--card2);border-radius:12px;padding:10px}
+.team h5{margin:0 0 6px;font-size:14px;display:flex;justify-content:space-between}
+.tp{display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:4px 0;font-size:13px}
+.tp.pick{border-color:var(--warn);background:#3a2f12}
+.tp .gk{font-size:10px;background:var(--warn);color:#2b1d00;border-radius:4px;padding:0 4px;margin-left:4px}
+.bank{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px;margin-top:8px}
+.linkbox{display:flex;gap:6px;margin:4px 0 12px} .linkbox input{flex:1}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#fff;color:#111;padding:10px 16px;border-radius:10px;font-size:14px;box-shadow:0 6px 24px #0008;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;z-index:9}
+#toast.show{opacity:1} #toast.err{background:var(--bad);color:#fff}
+.loading{padding:60px 0;text-align:center;color:var(--muted)}
+.hint{color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading…</div></div>
+<div id="toast"></div>
+<script>
+// =====================================================================
+//  CONFIG: paste your Supabase project URL and anon/publishable key.
+//  Leave as-is to run in demo mode (data stays in your browser only).
+// =====================================================================
+const CONFIG = {
+  SUPABASE_URL: 'https://xbomyyqdbtpoiyxhjarf.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_cBe_0TL4I3MR6PHYGtXPIw_Oc3G4RKd',
+};
+
+const DEMO = !/^https:\/\//.test(CONFIG.SUPABASE_URL);
+const ROLES = ['GK','DEF','MID','ATT'];
+const ROLE_NAMES = {GK:'Goalkeeper',DEF:'Defence',MID:'Midfield',ATT:'Attack'};
+const SKILLS = ['','Beginner','Casual','Decent','Good','Very good'];
+
+// ---------------------------------------------------------------- utils
+const pad = n => String(n).padStart(2,'0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parseISO = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d); };
+const addDays = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+const todayISO = () => iso(new Date());
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => '£' + Number(n||0).toFixed(2);
+const fmtDay = s => parseISO(s).toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+const fmtShort = s => parseISO(s).toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+const fmtTime = t => String(t||'').slice(0,5);
+const fmtDT = d => d.toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const kickoffDate = s => new Date(`${s.day}T${fmtTime(s.kickoff)}:00`);
+const endDate = s => new Date(kickoffDate(s).getTime() + Number(s.hours)*3600e3);
+const cancelDeadline = s => new Date(kickoffDate(s).getTime() - s.free_cancel_hours*3600e3);
+const splitHead = (total, cap) => cap > 0 ? Math.ceil(Number(total)/cap*10)/10 : 0;
+const val = id => document.getElementById(id)?.value ?? '';
+const stars = n => '★'.repeat(n) + '<span style="opacity:.25">' + '★'.repeat(5-n) + '</span>';
+const mapLink = s => s.location_url || (s.location_address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(s.location_address) : '');
+
+function toast(msg, err){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', 3200);
+}
+async function copy(text){
+  try { await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch { prompt('Copy this:', text); }
+}
+
+// Squad order: first come first served, +1s count as heads
+function squadOf(rows, cap){
+  const avail = rows.filter(r => r.status === 'available')
+    .sort((a,b) => a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : (a.player_id < b.player_id ? -1 : 1));
+  let cum = 0; const inS = [], wait = [];
+  avail.forEach(r => { cum += 1 + r.plus_ones; (cum <= cap ? inS : wait).push(r); });
+  return { inS, wait, late: rows.filter(r => r.status === 'late_drop'),
+           heads: inS.reduce((n,r) => n + 1 + r.plus_ones, 0),
+           total: avail.reduce((n,r) => n + 1 + r.plus_ones, 0), cap };
+}
+
+// ---------------------------------------------------------------- state
+const qs = new URLSearchParams(location.search);
+const S = {
+  settings:null, players:[], avail:[], sessions:[],
+  me: null, isHost:false, hostKey: qs.get('host') || (()=>{ try { return localStorage.getItem('fb_host'); } catch { return null; } })(),
+  groupPwRequired:false, groupPw:'',
+  tab:'cal', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  sel:null, quick:false, plus:{}, prof:null, teamsDraft:{}, pick:null,
+};
+try { S.me = JSON.parse(localStorage.getItem('fb_me') || 'null'); } catch {}
+if (qs.get('me')) {
+  const [id, token] = qs.get('me').split('.');
+  if (id && token) { S.me = {id, token}; try { localStorage.setItem('fb_me', JSON.stringify(S.me)); } catch {} }
+  qs.delete('me'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : ''));
+}
+
+const playerById = id => S.players.find(p => p.id === id);
+const sessionOn = day => S.sessions.find(s => s.day === day);
+const dayRows = day => S.avail.filter(a => a.day === day);
+const capFor = day => (sessionOn(day) || S.settings).cap;
+const squad = day => squadOf(dayRows(day), capFor(day));
+const myRow = day => S.me && S.avail.find(a => a.day === day && a.player_id === S.me.id);
+const meP = () => S.me && playerById(S.me.id);
+
+// ---------------------------------------------------------------- backends
+let sb = null;
+async function rpc(name, params){
+  const { data, error } = await sb.rpc(name, params);
+  if (error) throw new Error(error.message);
+  return data;
+}
+const hk = () => S.isHost ? S.hostKey : null;
+
+const Remote = {
+  async load(){
+    const since = iso(addDays(new Date(), -60));
+    const [a,b,c,d] = await Promise.all([
+      sb.from('settings').select('*').eq('id',1).single(),
+      sb.from('players_public').select('*').order('name'),
+      sb.from('availability').select('*').gte('day', since),
+      sb.from('sessions').select('*').gte('day', since).order('day'),
+    ]);
+    for (const r of [a,b,c,d]) if (r.error) throw new Error(r.error.message);
+    return { settings:a.data, players:b.data, avail:c.data, sessions:d.data };
+  },
+  checkHost: k => rpc('host_check', {p_key:k}),
+  groupPwRequired: () => rpc('group_password_required', {}),
+  changeHostPassword: pw => rpc('host_change_password', {p_key:S.hostKey, p_new:pw}),
+  getGroupPassword: () => rpc('host_get_group_password', {p_key:S.hostKey}),
+  setGroupPassword: pw => rpc('host_set_group_password', {p_key:S.hostKey, p_pw:pw}),
+  savePlayer: o => rpc('save_player', {p_id:o.id||null, p_token:o.token||null, p_name:o.name, p_skill:o.skill, p_can:o.can, p_cannot:o.cannot, p_host_key:hk(), p_group_pw:o.groupPw||null}),
+  setAvail: o => rpc('set_availability', {p_player:o.player, p_token:o.token||null, p_day:o.day, p_on:o.on, p_plus:o.plus||0, p_plus_names:o.plusNames||'', p_plus_skill:o.plusSkill||3, p_host_key:hk()}),
+  saveSettings: p => rpc('host_save_settings', {p_key:S.hostKey, p}),
+  upsertSession: p => rpc('host_upsert_session', {p_key:S.hostKey, p}),
+  cancelSession: day => rpc('host_cancel_session', {p_key:S.hostKey, p_day:day}),
+  saveTeams: (day, teams) => rpc('host_save_teams', {p_key:S.hostKey, p_day:day, p_teams:teams}),
+  setPayment: (player, day, paid, waived) => rpc('host_set_payment', {p_key:S.hostKey, p_player:player, p_day:day, p_paid:paid, p_waived:waived}),
+  clearAvail: (player, day) => rpc('host_clear_availability', {p_key:S.hostKey, p_player:player, p_day:day}),
+  removePlayer: player => rpc('host_remove_player', {p_key:S.hostKey, p_player:player}),
+  playerToken: player => rpc('host_player_token', {p_key:S.hostKey, p_player:player}),
+};
+
+// Demo backend: same rules, stored in localStorage
+const Mock = (() => {
+  const KEY = 'fb_demo_v1';
+  const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id' + Math.random().toString(16).slice(2) + Date.now());
+  let seedN = 7; const rnd = () => (seedN = (seedN * 9301 + 49297) % 233280) / 233280;
+  function seed(){
+    const settings = { id:1, group_name:'Weekly 7-a-side', default_kickoff:'19:00:00', default_hours:1, price_total:84, price_per_head:6,
+      free_cancel_hours:48, location_name:'Demo Sports Centre, Pitch 2', location_address:'1 Example Road, London',
+      location_url:'', cap:14, format:7, bank_name:'Your Name', bank_sort:'00-00-00', bank_account:'12345678', bank_ref:'Football + your name', notes:'Bring a dark and a light top.' };
+    const names = ['Adam','Bilal','Chris','Dan','Ehsan','Femi','George','Hamza','Imran','Jack','Kofi','Luke','Musa','Nabil','Omar','Sam'];
+    const players = names.map((name,i) => {
+      const can = ROLES.filter(() => rnd() < .35), cannot = ROLES.filter(r => !can.includes(r) && rnd() < .2);
+      if (i === 0) { can.splice(0, can.length, 'GK'); } if (i === 7 && !can.includes('GK')) can.push('GK');
+      return { id:uid(), token:uid(), name, skill:1 + Math.floor(rnd()*5), can_play:can, cannot_play:cannot.filter(r=>!can.includes(r)), created_at:new Date().toISOString() };
+    });
+    const avail = [];
+    const sessDay = iso(addDays(new Date(), 5));
+    for (let d = 1; d <= 24; d++){
+      const day = iso(addDays(new Date(), d));
+      const p = day === sessDay ? .95 : rnd() * .7;
+      players.forEach((pl, i) => { if (rnd() < p) avail.push({ player_id:pl.id, day, plus_ones: rnd() < .08 ? 1 : 0, plus_one_names:'', plus_one_skill:3, status:'available',
+        created_at:new Date(Date.now() - 1e8 + i*1e5 + d*1e3).toISOString(), dropped_at:null, paid:false, waived:false }); });
+    }
+    const sessions = [{ day:sessDay, kickoff:'19:00:00', hours:1, price_total:84, price_per_head:6, free_cancel_hours:48,
+      location_name:settings.location_name, location_address:settings.location_address, location_url:'', cap:14, format:7, notes:settings.notes, teams:null }];
+    return { hostKey:'demo', groupPw:'', settings, players, avail, sessions };
+  }
+  let db; try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch {}
+  db = db || seed();
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
+  const clone = x => JSON.parse(JSON.stringify(x));
+  const isHost = k => !!k && k === db.hostKey;
+  const host = k => { if (!isHost(k)) throw new Error('Host only'); };
+  const delay = () => new Promise(r => setTimeout(r, 80));
+  return {
+    async load(){ await delay(); return clone({ settings:db.settings, players:db.players.map(({token, ...p}) => p).sort((a,b)=>a.name.localeCompare(b.name)), avail:db.avail, sessions:db.sessions }); },
+    async checkHost(k){ return isHost(k); },
+    async groupPwRequired(){ return !!db.groupPw; },
+    async changeHostPassword(pw){ host(hk()); if ((pw||'').length < 8) throw new Error('Use at least 8 characters'); db.hostKey = pw; save(); },
+    async getGroupPassword(){ host(hk()); return db.groupPw || ''; },
+    async setGroupPassword(pw){ host(hk()); db.groupPw = (pw||'').trim(); save(); },
+    async savePlayer(o){
+      if (!o.name.trim()) throw new Error('Please enter your name');
+      if (db.players.some(p => p.name.trim().toLowerCase() === o.name.trim().toLowerCase() && p.id !== o.id))
+        throw new Error("That name is already taken. If it's you, open your personal link or ask the host for it");
+      if (!o.id && db.groupPw && !isHost(hk()) && (o.groupPw||'') !== db.groupPw) throw new Error('Wrong group password. Ask the host for it');
+      if (!o.id){ const p = { id:uid(), token:uid(), name:o.name.trim(), skill:o.skill, can_play:o.can, cannot_play:o.cannot, created_at:new Date().toISOString() };
+        db.players.push(p); save(); return { id:p.id, token:p.token }; }
+      const p = db.players.find(p => p.id === o.id && (p.token === o.token || isHost(hk())));
+      if (!p) throw new Error('Not allowed');
+      Object.assign(p, { name:o.name.trim(), skill:o.skill, can_play:o.can, cannot_play:o.cannot }); save();
+      return { id:p.id, token: p.token === o.token ? p.token : null };
+    },
+    async setAvail(o){
+      const p = db.players.find(p => p.id === o.player && (p.token === o.token || isHost(hk())));
+      if (!p) throw new Error('Not allowed');
+      if (o.day < todayISO()) throw new Error('That day has already passed');
+      const sess = db.sessions.find(s => s.day === o.day);
+      if (sess && new Date() >= kickoffDate(sess)) throw new Error('This session has already kicked off');
+      let row = db.avail.find(a => a.player_id === o.player && a.day === o.day);
+      if (o.on){
+        const vals = { plus_ones:Math.max(0,Math.min(5,o.plus||0)), plus_one_names:o.plusNames||'', plus_one_skill:o.plusSkill||3 };
+        if (!row) db.avail.push({ player_id:o.player, day:o.day, ...vals, status:'available', created_at:new Date().toISOString(), dropped_at:null, paid:false, waived:false });
+        else { if (row.status === 'late_drop') row.created_at = new Date().toISOString(); Object.assign(row, vals, {status:'available', dropped_at:null}); }
+        save(); return 'available';
+      }
+      if (!row) return 'removed';
+      if (row.status === 'late_drop') return 'late_drop';
+      if (sess && new Date() >= cancelDeadline(sess)){
+        const sq = squadOf(db.avail.filter(a => a.day === o.day), sess.cap);
+        if (sq.inS.includes(row)){ row.status = 'late_drop'; row.dropped_at = new Date().toISOString(); save(); return 'late_drop'; }
+      }
+      db.avail = db.avail.filter(a => a !== row); save(); return 'removed';
+    },
+    async saveSettings(p){ host(hk()); Object.assign(db.settings, p, {id:1}); save(); },
+    async upsertSession(p){ host(hk()); const s = db.sessions.find(s => s.day === p.day);
+      if (s) Object.assign(s, p); else db.sessions.push({ ...p, teams:null }); db.sessions.sort((a,b)=>a.day<b.day?-1:1); save(); },
+    async cancelSession(day){ host(hk()); db.sessions = db.sessions.filter(s => s.day !== day);
+      db.avail.forEach(a => { if (a.day === day && a.status === 'late_drop'){ a.status = 'available'; a.dropped_at = null; } }); save(); },
+    async saveTeams(day, teams){ host(hk()); const s = db.sessions.find(s => s.day === day); if (s) s.teams = teams; save(); },
+    async setPayment(player, day, paid, waived){ host(hk()); const r = db.avail.find(a => a.player_id === player && a.day === day);
+      if (r){ if (paid !== null) r.paid = paid; if (waived !== null) r.waived = waived; } save(); },
+    async clearAvail(player, day){ host(hk()); db.avail = db.avail.filter(a => !(a.player_id === player && a.day === day)); save(); },
+    async removePlayer(player){ host(hk()); db.players = db.players.filter(p => p.id !== player); db.avail = db.avail.filter(a => a.player_id !== player); save(); },
+    async playerToken(player){ host(hk()); return db.players.find(p => p.id === player)?.token; },
+    reset(){ localStorage.removeItem(KEY); localStorage.removeItem('fb_me'); localStorage.removeItem('fb_host'); location.href = location.pathname; },
+  };
+})();
+
+const API = DEMO ? Mock : Remote;
+
+async function loadGroupPw(){ try { S.groupPwHost = await API.getGroupPassword(); if (S.tab === 'setup') render(); } catch {} }
+async function reload(){
+  const [d, gp] = await Promise.all([API.load(), API.groupPwRequired().catch(() => false)]);
+  Object.assign(S, d); S.groupPwRequired = !!gp;
+  if (S.me && !playerById(S.me.id)) { S.me = null; try { localStorage.removeItem('fb_me'); } catch {} }
+  render();
+}
+
+// ---------------------------------------------------------------- views
+function render(){
+  const app = document.getElementById('app');
+  if (!S.settings) return;
+  const tabs = [['cal','Calendar'],['sess','Sessions'],['me', S.me ? 'My profile' : 'Join']];
+  if (S.isHost) tabs.push(['setup','Host setup']);
+  const who = S.isHost ? '<span class="role host">Host</span>' : `<span class="role">${S.me && meP() ? esc(meP().name) : 'Not signed up'}</span>`;
+  const scrollY = window.scrollY;
+  app.innerHTML = `
+    ${DEMO ? `<div class="demo">Demo mode, data only saves in this browser. ${S.isHost ? '' : 'Host password is <b>demo</b>.'} · <a href="#" data-act="demo-reset">Reset demo</a></div>` : ''}
+    <header><h1>⚽ ${esc(S.settings.group_name)}</h1>${who}</header>
+    <nav>${tabs.map(([k,l]) => `<button data-act="tab" data-v="${k}" class="${S.tab===k?'on':''}">${l}</button>`).join('')}</nav>
+    <main>${S.tab==='cal' ? viewCal() : S.tab==='sess' ? viewSessions() : S.tab==='me' ? viewProfile() : S.tab==='login' ? viewLogin() : viewSetup()}</main>
+    <footer style="text-align:center;margin-top:24px">${S.isHost
+      ? '<button class="btn small" data-act="host-logout">Log out of host mode</button>'
+      : (S.tab === 'login' ? '' : '<button class="btn small" data-act="tab" data-v="login" style="opacity:.7">Host login</button>')}</footer>`;
+  window.scrollTo(0, scrollY);
+  syncPlusUI();
+}
+
+function heatLevel(heads, cap){
+  if (!heads) return 0;
+  const r = heads / cap;
+  return r >= 1 ? 4 : r >= 2/3 ? 3 : r >= 1/3 ? 2 : 1;
+}
+
+function viewCal(){
+  const m = S.month, y = m.getFullYear(), mo = m.getMonth();
+  const offset = (new Date(y,mo,1).getDay() + 6) % 7;
+  const n = new Date(y,mo+1,0).getDate();
+  const t = todayISO();
+  let cells = '';
+  for (let i = 0; i < offset; i++) cells += '<div class="cell empty"></div>';
+  for (let d = 1; d <= n; d++){
+    const day = iso(new Date(y,mo,d));
+    const sq = squad(day), sess = sessionOn(day), mine = myRow(day);
+    const cls = ['cell', 'h' + heatLevel(sq.total, sq.cap), day < t ? 'past' : '', day === t ? 'today' : '', S.sel === day ? 'sel' : '', sess ? 'sess' : '',
+                 mine ? (mine.status === 'late_drop' ? 'mine late' : 'mine') : ''].join(' ');
+    cells += `<button class="${cls}" data-act="day" data-v="${day}" aria-label="${fmtDay(day)}, ${sq.total} available">
+      <span class="dn">${d}</span>${sess ? '<span class="ball">⚽</span>' : ''}${sq.total ? `<span class="cnt">${sq.total}</span>` : ''}</button>`;
+  }
+  const cap = S.settings.cap, a = Math.ceil(cap/3), b = Math.ceil(cap*2/3);
+  const legend = `<div class="legend">
+    <span><i class="sw" style="background:var(--h1)"></i>1–${a-1}</span>
+    <span><i class="sw" style="background:var(--h2)"></i>${a}–${b-1}</span>
+    <span><i class="sw" style="background:var(--h3)"></i>${b}–${cap-1}</span>
+    <span><i class="sw" style="background:var(--h4)"></i>${cap}+ (full squad)</span>
+    <span>⚽ booked session</span><span>● you're free</span></div>`;
+  const top = S.me
+    ? `<label class="quick"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark: tap days to toggle when you're free</label>`
+    : `<div class="note">Join first so you can mark the days you're free. <button class="btn primary" data-act="tab" data-v="me">Join</button></div>`;
+  return `<div class="layout"><section>
+      ${top}
+      <div class="calhead"><button data-act="month" data-v="-1" aria-label="Previous month">‹</button>
+        <h2>${m.toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</h2>
+        <button data-act="month" data-v="1" aria-label="Next month">›</button></div>
+      <div class="dow">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div>${d}</div>`).join('')}</div>
+      <div class="grid">${cells}</div>${legend}
+    </section>
+    <section id="dayPanel">${S.sel ? viewDay(S.sel) : '<p class="hint">Tap a day to see who\'s free.</p>'}</section></div>`;
+}
+
+function personLine(r, tag, host){
+  const p = playerById(r.player_id); if (!p) return '';
+  const plus = r.plus_ones ? ` <span class="muted">+${r.plus_ones}${r.plus_one_names ? ' (' + esc(r.plus_one_names) + ')' : ''}</span>` : '';
+  const roles = ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('');
+  return `<div class="person"><div><span class="pname">${esc(p.name)}</span>${plus}<br><span class="stars">${stars(p.skill)}</span> ${roles}</div>
+    <div class="row">${tag || ''}${host ? `<button class="btn small danger" title="Remove from this day (no charge)" data-act="host-clear" data-v="${r.player_id}|${r.day}">✕</button>` : ''}</div></div>`;
+}
+
+function sessionInfo(s){
+  const link = mapLink(s);
+  return `<div class="info">
+    <b>When</b><span>${fmtTime(s.kickoff)}–${endDate(s).toTimeString().slice(0,5)} (${Number(s.hours)}h)</span>
+    <b>Where</b><span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">${esc(s.location_name || s.location_address || 'Map')}</a>` : esc(s.location_name)}${s.location_address ? '<br><span class="muted small">' + esc(s.location_address) + '</span>' : ''}</span>
+    <b>Price</b><span>${money(s.price_per_head)} each${Number(s.price_total) ? ` <span class="muted small">(pitch ${money(s.price_total)})</span>` : ''}</span>
+    <b>Pull out</b><span>Free until ${fmtDT(cancelDeadline(s))}<br><span class="muted small">After that you still pay your share</span></span>
+    <b>Format</b><span>${s.format}-a-side, max ${s.cap}</span>
+    ${s.notes ? `<b>Notes</b><span>${esc(s.notes)}</span>` : ''}</div>`;
+}
+
+function myControls(day, sess, sq){
+  const r = myRow(day);
+  const per = sess ? Number(sess.price_per_head) : 0;
+  if (r && r.status === 'late_drop'){
+    return `<div class="mine-box"><b>You pulled out late.</b> You still owe ${money(per*(1+r.plus_ones))}${r.waived ? ' (waived by host)' : ''}.
+      <div style="margin-top:10px"><button class="btn" data-act="avail-on" data-v="${day}">I can play after all</button></div></div>`;
+  }
+  let status = '';
+  if (r){
+    if (sess){
+      const wi = sq.wait.indexOf(r);
+      status = wi >= 0 ? `<span class="tag wait">Waitlist #${wi+1}</span>` : `<span class="tag in">You're in the squad</span>`;
+    } else status = `<span class="tag in">You're marked free</span>`;
+  }
+  const n = S.plus[day] ?? (r ? r.plus_ones : 0);
+  return `<div class="mine-box">
+    ${r ? `<div class="row" style="justify-content:space-between;margin-bottom:10px">${status}<button class="btn danger" data-act="avail-off" data-v="${day}">${sess ? 'Pull out' : "I'm not free"}</button></div>`
+        : `<button class="btn primary big" data-act="avail-on" data-v="${day}">${sess ? "I'm in" : "I'm free this day"}</button>`}
+    <div class="row" style="margin-top:10px"><span class="small muted">Bringing a +1?</span>
+      <div class="stepper"><button data-act="plus" data-v="-1" aria-label="Fewer">−</button><span id="plusN">${n}</span><button data-act="plus" data-v="1" aria-label="More">+</button></div></div>
+    <div id="plusMore">
+      <label class="f">Their name(s)</label><input type="text" id="plusNames" placeholder="e.g. Sam, Ali" value="${esc(r ? r.plus_one_names : '')}">
+      <label class="f">Their skill level</label><select id="plusSkill">${[1,2,3,4,5].map(k => `<option value="${k}" ${(r ? r.plus_one_skill : 3) === k ? 'selected' : ''}>${k} · ${SKILLS[k]}</option>`).join('')}</select>
+    </div>
+    ${r ? `<div style="margin-top:10px"><button class="btn" data-act="avail-on" data-v="${day}">Save +1 changes</button></div>` : ''}
+  </div>`;
+}
+
+function syncPlusUI(){
+  const el = document.getElementById('plusMore'), n = document.getElementById('plusN');
+  if (el && n) el.style.display = Number(n.textContent) > 0 ? '' : 'none';
+}
+
+function hostDayForm(day, sess){
+  const d = sess || { kickoff:S.settings.default_kickoff, hours:S.settings.default_hours, price_total:S.settings.price_total, price_per_head:S.settings.price_per_head,
+    free_cancel_hours:S.settings.free_cancel_hours, location_name:S.settings.location_name, location_address:S.settings.location_address,
+    location_url:S.settings.location_url, cap:S.settings.cap, format:S.settings.format, notes:S.settings.notes };
+  const notOn = S.players.filter(p => !dayRows(day).some(r => r.player_id === p.id));
+  return `<h4>Host</h4>
+    ${notOn.length ? `<div class="row"><select id="hostAdd" style="flex:1">${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <button class="btn" data-act="host-add" data-v="${day}">Add to this day</button></div>` : ''}
+    <h4>${sess ? 'Edit booked session' : 'Book a session on this day'}</h4>
+    <div class="grid3">
+      <div><label class="f">Kick-off</label><input type="time" id="f_kickoff" value="${fmtTime(d.kickoff)}"></div>
+      <div><label class="f">Hours</label><input type="number" step="0.5" min="0.5" id="f_hours" value="${Number(d.hours)}"></div>
+      <div><label class="f">Free pull-out until (hrs before)</label><input type="number" min="0" id="f_cancel" value="${d.free_cancel_hours}"></div>
+      <div><label class="f">Pitch total £</label><input type="number" step="0.01" min="0" id="f_total" value="${Number(d.price_total)}"></div>
+      <div><label class="f">Per head £</label><input type="number" step="0.01" min="0" id="f_head" value="${Number(d.price_per_head)}"></div>
+      <div><label class="f">Max players</label><input type="number" min="2" id="f_cap" value="${d.cap}"></div>
+    </div>
+    <label class="f">Format (a-side)</label><input type="number" min="3" max="11" id="f_format" value="${d.format}">
+    <label class="f">Pitch / venue name</label><input type="text" id="f_lname" value="${esc(d.location_name)}">
+    <label class="f">Address</label><input type="text" id="f_laddr" value="${esc(d.location_address)}">
+    <label class="f">Map link (optional, otherwise made from the address)</label><input type="url" id="f_lurl" value="${esc(d.location_url)}">
+    <label class="f">Notes for players</label><textarea id="f_notes">${esc(d.notes)}</textarea>
+    <div class="row" style="margin-top:12px"><button class="btn primary" data-act="sess-save" data-v="${day}">${sess ? 'Save changes' : 'Book this day'}</button>
+      ${sess ? `<button class="btn danger" data-act="sess-cancel" data-v="${day}">Cancel session</button>` : ''}</div>`;
+}
+
+function viewDay(day){
+  const sess = sessionOn(day), sq = squad(day);
+  const past = day < todayISO(), started = sess && new Date() >= kickoffDate(sess);
+  const host = S.isHost && !past;
+  let h = `<div class="panel"><h3>${fmtDay(day)}</h3>`;
+  if (sess) h += sessionInfo(sess);
+  else if (!past) h += `<p class="muted small" style="margin:0">Not booked yet. Mark yourself free and the host will pick the best day.</p>`;
+  if (S.me && !past && !started) h += myControls(day, sess, sq);
+  if (sess){
+    h += `<h4>In the squad · ${sq.heads}/${sq.cap}</h4>` + (sq.inS.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
+    if (sq.wait.length) h += `<h4>Waitlist</h4>` + sq.wait.map((r,i) => personLine(r, `<span class="tag wait">#${i+1}</span>`, host)).join('');
+    if (sq.late.length) h += `<h4>Pulled out late</h4>` + sq.late.map(r => personLine(r, '<span class="tag late">owes</span>', host)).join('');
+  } else {
+    const rows = sq.inS.concat(sq.wait);
+    h += `<h4>Free this day · ${sq.total} ${sq.total === 1 ? 'person' : 'people'}</h4>` + (rows.map(r => personLine(r, '', host)).join('') || '<p class="muted">Nobody yet</p>');
+  }
+  if (host) h += hostDayForm(day, sess);
+  return h + '</div>';
+}
+
+// ----- teams
+function teamPool(day){
+  return squad(day).inS.flatMap(r => {
+    const p = playerById(r.player_id); if (!p) return [];
+    const out = [{ key:p.id, name:p.name, skill:p.skill, can:p.can_play, cannot:p.cannot_play }];
+    const extra = (r.plus_one_names || '').split(',').map(s => s.trim()).filter(Boolean);
+    for (let i = 0; i < r.plus_ones; i++) out.push({ key:p.id + '#' + (i+1), name: extra[i] || `${p.name}'s +1`, skill:r.plus_one_skill || 3, can:[], cannot:[] });
+    return out;
+  });
+}
+function scoreTeams(A, B){
+  const sum = t => t.reduce((n,p) => n + p.skill, 0);
+  let s = Math.abs(sum(A) - sum(B)) * 2;
+  for (const r of ROLES){
+    const ca = A.filter(p => p.can.includes(r)).length, cb = B.filter(p => p.can.includes(r)).length;
+    if (r === 'GK'){ if (ca + cb >= 2) s += (ca ? 0 : 6) + (cb ? 0 : 6); s += Math.max(0, Math.abs(ca-cb) - 1) * 2; }
+    else s += Math.max(0, Math.abs(ca-cb) - 1) * 1.5;
+  }
+  return s;
+}
+function makeTeams(pool){
+  const tries = [];
+  for (let i = 0; i < 800; i++){
+    const sh = pool.slice();
+    for (let j = sh.length - 1; j > 0; j--){ const k = Math.floor(Math.random()*(j+1)); [sh[j], sh[k]] = [sh[k], sh[j]]; }
+    const A = sh.filter((_,i) => i % 2 === 0), B = sh.filter((_,i) => i % 2 === 1);
+    tries.push({ A, B, s:scoreTeams(A,B) });
+  }
+  const best = Math.min(...tries.map(t => t.s));
+  const good = tries.filter(t => t.s <= best + 1);
+  const pick = good[Math.floor(Math.random()*good.length)];
+  return { a:pick.A, b:pick.B, published:false, at:new Date().toISOString() };
+}
+function teamCol(day, t, side, label, editable){
+  const list = t[side];
+  const total = list.reduce((n,p) => n + p.skill, 0);
+  const gk = list.find(p => p.can.includes('GK'));
+  const items = list.slice().sort((x,y) => (y === gk) - (x === gk)).map(p => {
+    const i = list.indexOf(p), picked = S.pick && S.pick.day === day && S.pick.side === side && S.pick.i === i;
+    const inner = `${esc(p.name)}${p === gk ? '<span class="gk">GK</span>' : ''} <span class="stars" style="float:right">${'★'.repeat(p.skill)}</span>`;
+    return editable ? `<button class="tp ${picked ? 'pick' : ''}" data-act="pick" data-v="${day}|${side}|${i}">${inner}</button>` : `<div class="tp">${inner}</div>`;
+  }).join('');
+  return `<div class="team"><h5><span>${label}</span><span class="muted small">skill ${total}</span></h5>${items}${gk ? '' : '<div class="muted small">No natural keeper, rotate</div>'}</div>`;
+}
+function teamsBlock(s){
+  const saved = s.teams, draft = S.teamsDraft[s.day];
+  if (!S.isHost){
+    if (!saved || !saved.published) return '';
+    return `<h4>Teams</h4><div class="teams">${teamCol(s.day, saved, 'a', 'Bibs', false)}${teamCol(s.day, saved, 'b', 'No bibs', false)}</div>`;
+  }
+  const t = draft || saved;
+  const pool = teamPool(s.day);
+  let h = `<h4>Teams</h4>`;
+  if (!pool.length) return h + '<p class="muted">Nobody in the squad yet.</p>';
+  if (t){
+    const keys = new Set(pool.map(p => p.key)), tk = new Set([...t.a, ...t.b].map(p => p.key));
+    const stale = keys.size !== tk.size || [...keys].some(k => !tk.has(k));
+    if (stale) h += `<p class="small" style="color:var(--warn)">The squad has changed since these teams were made. Reshuffle to include everyone.</p>`;
+    h += `<p class="muted small">Tap a player then one on the other side to swap them.</p>
+      <div class="teams">${teamCol(s.day, t, 'a', 'Bibs', true)}${teamCol(s.day, t, 'b', 'No bibs', true)}</div>`;
+  }
+  h += `<div class="row" style="margin-top:10px"><button class="btn primary" data-act="teams-gen" data-v="${s.day}">🎲 ${t ? 'Reshuffle' : 'Make teams'}</button>`;
+  if (draft) h += `<button class="btn" data-act="teams-save" data-v="${s.day}">Save and show to players</button><button class="btn" data-act="teams-discard" data-v="${s.day}">Discard</button>`;
+  else if (saved) h += saved.published ? `<button class="btn" data-act="teams-pub" data-v="${s.day}|0">Hide from players</button>` : `<button class="btn" data-act="teams-pub" data-v="${s.day}|1">Show to players</button>`;
+  h += `</div>${!draft && saved ? `<p class="muted small">${saved.published ? 'Players can see these teams.' : 'Only you can see these teams.'}</p>` : ''}`;
+  return h;
+}
+
+// ----- payments
+function owesFor(r, s){
+  return (r.status === 'late_drop' && r.waived) ? 0 : (1 + r.plus_ones) * Number(s.price_per_head);
+}
+function paymentsBlock(s, sq){
+  const rows = sq.inS.map(r => ({r, kind:'in'})).concat(sq.late.map(r => ({r, kind:'late'})));
+  if (!rows.length) return '';
+  let exp = 0, got = 0;
+  const trs = rows.map(({r, kind}) => {
+    const p = playerById(r.player_id); if (!p) return '';
+    const o = owesFor(r, s); exp += o; if (r.paid) got += o;
+    return `<tr><td>${esc(p.name)}${r.plus_ones ? ' +' + r.plus_ones : ''}${kind === 'late' ? ' <span class="tag late">late</span>' : ''}</td><td>${money(o)}</td>
+      <td><input type="checkbox" data-act="paid" data-v="${r.player_id}|${s.day}" ${r.paid ? 'checked' : ''} aria-label="Paid"></td>
+      <td>${kind === 'late' ? `<input type="checkbox" data-act="waive" data-v="${r.player_id}|${s.day}" ${r.waived ? 'checked' : ''} aria-label="Waive">` : ''}</td></tr>`;
+  }).join('');
+  return `<h4>Payments · ${money(got)} of ${money(exp)} received</h4>
+    <table><thead><tr><th>Player</th><th>Owes</th><th>Paid</th><th>Waive</th></tr></thead><tbody>${trs}</tbody></table>`;
+}
+function bankBox(){
+  const st = S.settings;
+  if (!st.bank_account && !st.bank_name) return '';
+  return `<div class="bank"><b>Pay by bank transfer</b><br>${esc(st.bank_name)}<br>Sort code ${esc(st.bank_sort)} · Account ${esc(st.bank_account)}${st.bank_ref ? '<br>Reference: ' + esc(st.bank_ref) : ''}</div>`;
+}
+
+function sessionCard(s){
+  const sq = squad(s.day), r = myRow(s.day);
+  let mine = '';
+  if (r && !S.isHost){
+    const inS = sq.inS.includes(r), late = r.status === 'late_drop', wi = sq.wait.indexOf(r);
+    const owe = (inS || late) ? owesFor(r, s) : 0;
+    mine = `<div class="mine-box">${inS ? '<span class="tag in">You\'re in</span>' : late ? '<span class="tag late">Pulled out late</span>' : `<span class="tag wait">Waitlist #${wi+1}</span>`}
+      ${owe ? ` Your share ${money(owe)} · ${r.paid ? '<b style="color:var(--accent)">paid ✓</b>' : '<b>not paid yet</b>'}` : ''}
+      ${owe && !r.paid ? bankBox() : ''}</div>`;
+  } else if (S.me && !S.isHost && s.day >= todayISO()){
+    mine = `<div class="mine-box">You're not down for this one. <button class="btn" data-act="goto" data-v="${s.day}">Open day</button></div>`;
+  }
+  const names = sq.inS.map(r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; }).join(', ');
+  return `<div class="card"><h3>${fmtDay(s.day)}</h3>${sessionInfo(s)}${mine}
+    <h4>Squad · ${sq.heads}/${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</h4><p style="margin:0">${names || '<span class="muted">Nobody yet</span>'}</p>
+    ${S.isHost ? paymentsBlock(s, sq) : ''}${teamsBlock(s)}
+    ${S.isHost ? `<div style="margin-top:12px"><button class="btn" data-act="goto" data-v="${s.day}">Edit in calendar</button></div>` : ''}</div>`;
+}
+
+function viewSessions(){
+  const t = todayISO();
+  const up = S.sessions.filter(s => s.day >= t);
+  let past = S.sessions.filter(s => s.day < t).reverse();
+  if (!S.isHost) past = past.filter(s => { const r = myRow(s.day); if (!r || r.paid) return false; const sq = squad(s.day); return (sq.inS.includes(r) || r.status === 'late_drop') && owesFor(r, s) > 0; });
+  return (up.length ? up.map(sessionCard).join('') : `<div class="note">No sessions booked yet. ${S.isHost ? 'Pick a day on the calendar and book it.' : 'Mark the days you\'re free on the calendar.'}</div>`)
+    + (past.length ? `<h4>${S.isHost ? 'Recent sessions' : 'Still to pay'}</h4>` + past.map(sessionCard).join('') : '');
+}
+
+// ----- profile
+function initProf(){
+  const p = meP();
+  S.prof = p ? { name:p.name, skill:p.skill, roles:Object.fromEntries(ROLES.map(r => [r, p.can_play.includes(r) ? 'can' : p.cannot_play.includes(r) ? 'cant' : ''])) }
+             : { name:'', skill:3, roles:{GK:'',DEF:'',MID:'',ATT:''} };
+}
+function viewProfile(){
+  if (!S.prof) initProf();
+  const P = S.prof, p = meP();
+  const link = p ? location.origin + location.pathname + '?me=' + S.me.id + '.' + S.me.token : '';
+  return `<div class="card"><h3>${p ? 'My profile' : 'Join the group'}</h3>
+    ${p ? '' : '<p class="muted" style="margin-top:0">Takes 20 seconds. Then mark the days you\'re free on the calendar.</p>'}
+    <label class="f">Your name</label><input type="text" id="pfName" value="${esc(P.name)}" maxlength="40">
+    ${!p && S.groupPwRequired && !S.isHost ? `<label class="f">Group password (ask the host)</label><input type="password" id="pfGroupPw" value="${esc(S.groupPw)}">` : ''}
+    <label class="f">Skill level (be honest, it balances the teams)</label>
+    <div class="choice">${[1,2,3,4,5].map(k => `<button class="${P.skill===k?'on':''}" data-act="skill" data-v="${k}">${k} · ${SKILLS[k]}</button>`).join('')}</div>
+    <label class="f">Positions: tap once for "can play", twice for "can't play", again to clear</label>
+    <div class="choice">${ROLES.map(r => `<button class="${P.roles[r]}" data-act="role" data-v="${r}">${P.roles[r]==='can'?'✓ ':P.roles[r]==='cant'?'✕ ':''}${ROLE_NAMES[r]}</button>`).join('')}</div>
+    <div style="margin-top:16px"><button class="btn primary" data-act="prof-save">${p ? 'Save' : 'Join'}</button></div></div>
+    ${p ? `<div class="card"><h3>Use on another device</h3><p class="muted small" style="margin-top:0">Open this personal link on your other phone or laptop. Keep it to yourself, it lets anyone edit your availability.</p>
+      <div class="linkbox"><input type="text" readonly value="${esc(link)}"><button class="btn" data-act="copy" data-v="${esc(link)}">Copy</button></div>
+      <button class="btn danger" data-act="prof-forget">Sign out on this device</button></div>` : ''}`;
+}
+
+// ----- host login
+function viewLogin(){
+  return `<div class="card" style="max-width:420px;margin:0 auto"><h3>Host login</h3>
+    <p class="muted small" style="margin-top:0">Only for whoever runs the sessions. This device stays logged in until you log out.</p>
+    <label class="f">Host password</label><input type="password" id="hostPw" autocomplete="current-password">
+    <div class="row" style="margin-top:12px"><button class="btn primary" data-act="host-login">Log in</button><button class="btn" data-act="tab" data-v="cal">Cancel</button></div></div>`;
+}
+
+// ----- host setup
+function viewSetup(){
+  const st = S.settings;
+  const base = location.origin + location.pathname;
+  const field = (id, label, v, type='text', extra='') => `<div><label class="f">${label}</label><input type="${type}" id="st_${id}" value="${esc(v)}" ${extra}></div>`;
+  return `<div class="card"><h3>Links</h3>
+    <label class="f">Share with friends</label><div class="linkbox"><input type="text" readonly value="${esc(base)}"><button class="btn primary" data-act="copy" data-v="${esc(base)}">Copy</button></div>
+    <p class="muted small" style="margin:0">Same link for you. Tap "Host login" at the bottom and enter your host password.</p></div>
+  <div class="card"><h3>Passwords</h3>
+    <label class="f">Group password friends need to join (leave blank for none)</label>
+    <div class="linkbox"><input type="text" id="st_group_pw" value="${esc(S.groupPwHost ?? '')}" placeholder="${S.groupPwHost === undefined ? 'Loading…' : 'No password'}"><button class="btn" data-act="group-pw-save">Save</button></div>
+    <label class="f">Change your host password (at least 8 characters)</label>
+    <div class="linkbox"><input type="password" id="st_host_pw" autocomplete="new-password"><button class="btn" data-act="host-pw-save">Change</button></div></div>
+  <div class="card"><h3>Default session details</h3><p class="muted small" style="margin-top:0">Pre-filled whenever you book a day. You can still change them per session.</p>
+    ${field('group_name','Group name',st.group_name)}
+    <div class="grid3">
+      ${field('default_kickoff','Kick-off',fmtTime(st.default_kickoff),'time')}
+      ${field('default_hours','Hours',Number(st.default_hours),'number','step="0.5" min="0.5"')}
+      ${field('free_cancel_hours','Free pull-out until (hrs before)',st.free_cancel_hours,'number','min="0"')}
+      ${field('price_total','Pitch total £',Number(st.price_total),'number','step="0.01" min="0"')}
+      ${field('price_per_head','Per head £',Number(st.price_per_head),'number','step="0.01" min="0"')}
+      ${field('cap','Max players',st.cap,'number','min="2"')}
+    </div>
+    ${field('format','Format (a-side)',st.format,'number','min="3" max="11"')}
+    ${field('location_name','Pitch / venue name',st.location_name)}
+    ${field('location_address','Address',st.location_address)}
+    ${field('location_url','Map link (optional)',st.location_url,'url')}
+    <label class="f">Notes for players</label><textarea id="st_notes">${esc(st.notes)}</textarea>
+    <h4>Bank details shown to players who owe</h4>
+    <div class="grid2">${field('bank_name','Account name',st.bank_name)}${field('bank_sort','Sort code',st.bank_sort)}${field('bank_account','Account number',st.bank_account)}${field('bank_ref','Reference',st.bank_ref)}</div>
+    <div style="margin-top:14px"><button class="btn primary" data-act="settings-save">Save defaults</button></div></div>
+  <div class="card"><h3>Players · ${S.players.length}</h3>
+    ${S.players.map(p => `<div class="person"><div><span class="pname">${esc(p.name)}</span><br><span class="stars">${stars(p.skill)}</span>
+      ${ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('')}</div>
+      <div class="row"><button class="btn small" data-act="player-link" data-v="${p.id}" title="Copy their personal link">Their link</button>
+      <button class="btn small danger" data-act="player-remove" data-v="${p.id}">Remove</button></div></div>`).join('') || '<p class="muted">Nobody has joined yet.</p>'}</div>`;
+}
+
+// ---------------------------------------------------------------- actions
+async function setMine(day, on){
+  const n = Number(document.getElementById('plusN')?.textContent ?? S.plus[day] ?? 0);
+  return API.setAvail({ player:S.me.id, token:S.me.token, day, on,
+    plus: on ? (S.plus[day] ?? (myRow(day)?.plus_ones || 0) ?? n) : 0,
+    plusNames: on ? (document.getElementById('plusNames')?.value ?? myRow(day)?.plus_one_names ?? '') : '',
+    plusSkill: on ? Number(document.getElementById('plusSkill')?.value ?? myRow(day)?.plus_one_skill ?? 3) : 3 });
+}
+async function pullOut(day){
+  const sess = sessionOn(day), r = myRow(day);
+  if (sess && r){
+    const sq = squad(day);
+    if (sq.inS.includes(r) && new Date() >= cancelDeadline(sess)){
+      if (!confirm(`It's within ${sess.free_cancel_hours} hours of kick-off, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`)) return;
+    } else if (!confirm('Pull out of this session?')) return;
+  }
+  const res = await API.setAvail({ player:S.me.id, token:S.me.token, day, on:false });
+  toast(res === 'late_drop' ? 'Pulled out. Late pull-out, so your share is still due' : 'Updated');
+}
+
+const H = {
+  'tab': v => { S.tab = v; if (v === 'me') initProf(); if (v === 'setup' && S.groupPwHost === undefined) loadGroupPw(); render(); window.scrollTo(0,0); },
+  'month': v => { S.month = new Date(S.month.getFullYear(), S.month.getMonth() + Number(v), 1); render(); },
+  'goto': v => { S.tab = 'cal'; S.sel = v; const d = parseISO(v); S.month = new Date(d.getFullYear(), d.getMonth(), 1); render();
+    document.getElementById('dayPanel')?.scrollIntoView({behavior:'smooth'}); },
+  'day': async v => {
+    if (S.quick && S.me && v >= todayISO()){
+      const sess = sessionOn(v);
+      if (sess && new Date() >= kickoffDate(sess)) return toast('That session has already kicked off', true);
+      const r = myRow(v);
+      if (r && r.status === 'available') await pullOut(v);
+      else { await API.setAvail({ player:S.me.id, token:S.me.token, day:v, on:true, plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 }); }
+      S.sel = v; return reload();
+    }
+    S.sel = S.sel === v ? null : v; delete S.plus[v]; render();
+    if (S.sel && window.innerWidth < 860) document.getElementById('dayPanel')?.scrollIntoView({behavior:'smooth', block:'start'});
+  },
+  'plus': v => { const day = S.sel; const r = myRow(day);
+    const n = Math.max(0, Math.min(5, (S.plus[day] ?? (r ? r.plus_ones : 0)) + Number(v)));
+    S.plus[day] = n; document.getElementById('plusN').textContent = n; syncPlusUI(); },
+  'avail-on': async v => { await setMine(v, true); delete S.plus[v]; toast('Saved'); await reload(); },
+  'avail-off': async v => { await pullOut(v); delete S.plus[v]; await reload(); },
+  'host-add': async v => { const pid = val('hostAdd'); if (!pid) return;
+    await API.setAvail({ player:pid, token:null, day:v, on:true }); toast('Added'); await reload(); },
+  'host-clear': async v => { const [pid, day] = v.split('|'); const p = playerById(pid);
+    if (!confirm(`Remove ${p?.name || 'this player'} from ${fmtShort(day)}? They won't be charged.`)) return;
+    await API.clearAvail(pid, day); toast('Removed'); await reload(); },
+  'sess-save': async v => {
+    const p = { day:v, kickoff:val('f_kickoff'), hours:Number(val('f_hours'))||1, price_total:Number(val('f_total'))||0, price_per_head:Number(val('f_head'))||0,
+      free_cancel_hours:Math.max(0, parseInt(val('f_cancel'))||0), cap:Math.max(2, parseInt(val('f_cap'))||14), format:parseInt(val('f_format'))||7,
+      location_name:val('f_lname'), location_address:val('f_laddr'), location_url:val('f_lurl'), notes:val('f_notes') };
+    if (!p.kickoff) return toast('Add a kick-off time', true);
+    await API.upsertSession(p); toast(sessionOn(v) ? 'Session updated' : 'Session booked'); await reload(); },
+  'sess-cancel': async v => { if (!confirm(`Cancel the session on ${fmtShort(v)}? Late pull-out charges for it are cleared.`)) return;
+    await API.cancelSession(v); delete S.teamsDraft[v]; toast('Session cancelled'); await reload(); },
+  'teams-gen': v => { S.teamsDraft[v] = makeTeams(teamPool(v)); S.pick = null; render(); },
+  'teams-discard': v => { delete S.teamsDraft[v]; S.pick = null; render(); },
+  'teams-save': async v => { await API.saveTeams(v, { ...S.teamsDraft[v], published:true }); delete S.teamsDraft[v]; S.pick = null; toast('Teams saved and shown to players'); await reload(); },
+  'teams-pub': async v => { const [day, on] = v.split('|'); const s = sessionOn(day);
+    await API.saveTeams(day, { ...s.teams, published:on === '1' }); toast(on === '1' ? 'Teams shown to players' : 'Teams hidden'); await reload(); },
+  'pick': v => {
+    const [day, side, i] = v.split('|'); const idx = Number(i);
+    if (S.pick && S.pick.day === day && S.pick.side !== side){
+      const s = sessionOn(day);
+      const t = JSON.parse(JSON.stringify(S.teamsDraft[day] || s.teams));
+      const o = S.pick.side; [t[o][S.pick.i], t[side][idx]] = [t[side][idx], t[o][S.pick.i]];
+      S.teamsDraft[day] = t; S.pick = null;
+    } else S.pick = (S.pick && S.pick.day === day && S.pick.side === side && S.pick.i === idx) ? null : { day, side, i:idx };
+    render();
+  },
+  'skill': v => { S.prof.name = val('pfName'); S.groupPw = val('pfGroupPw') || S.groupPw; S.prof.skill = Number(v); render(); },
+  'role': v => { S.prof.name = val('pfName'); S.groupPw = val('pfGroupPw') || S.groupPw; const c = S.prof.roles[v]; S.prof.roles[v] = c === '' ? 'can' : c === 'can' ? 'cant' : ''; render(); },
+  'prof-save': async () => {
+    const P = S.prof; P.name = val('pfName').trim();
+    if (!P.name) return toast('Add your name', true);
+    S.groupPw = val('pfGroupPw');
+    const res = await API.savePlayer({ id:S.me?.id, token:S.me?.token, name:P.name, skill:P.skill, groupPw:S.groupPw,
+      can:ROLES.filter(r => P.roles[r] === 'can'), cannot:ROLES.filter(r => P.roles[r] === 'cant') });
+    const isNew = !S.me;
+    if (res && res.token){ S.me = { id:res.id, token:res.token }; try { localStorage.setItem('fb_me', JSON.stringify(S.me)); } catch {} }
+    toast(isNew ? 'Welcome! Now tap the days you\'re free' : 'Saved');
+    await reload();
+    if (isNew){ S.tab = 'cal'; S.quick = true; render(); }
+  },
+  'prof-forget': () => { if (!confirm('Sign out on this device? You can get back in with your personal link.')) return;
+    S.me = null; try { localStorage.removeItem('fb_me'); } catch {} initProf(); render(); },
+  'copy': v => copy(v),
+  'host-login': async () => {
+    const pw = val('hostPw'); if (!pw) return toast('Enter the host password', true);
+    if (!(await API.checkHost(pw))) return toast('Wrong password', true);
+    S.hostKey = pw; S.isHost = true; try { localStorage.setItem('fb_host', pw); } catch {}
+    S.tab = 'setup'; toast('Logged in as host'); await reload(); loadGroupPw();
+  },
+  'host-logout': () => { S.isHost = false; S.hostKey = null; S.groupPwHost = undefined; try { localStorage.removeItem('fb_host'); } catch {}
+    if (S.tab === 'setup') S.tab = 'cal'; toast('Logged out of host mode'); render(); },
+  'host-pw-save': async () => { const pw = val('st_host_pw');
+    await API.changeHostPassword(pw); S.hostKey = pw; try { localStorage.setItem('fb_host', pw); } catch {}
+    toast('Host password changed'); render(); },
+  'group-pw-save': async () => { const pw = val('st_group_pw').trim();
+    await API.setGroupPassword(pw); S.groupPwHost = pw; toast(pw ? 'Group password set' : 'Group password removed'); await reload(); },
+  'settings-save': async () => {
+    const g = id => val('st_' + id);
+    const p = { group_name:g('group_name') || 'Football', default_kickoff:g('default_kickoff') || '19:00', default_hours:Number(g('default_hours')) || 1,
+      free_cancel_hours:Math.max(0, parseInt(g('free_cancel_hours')) || 0), price_total:Number(g('price_total')) || 0, price_per_head:Number(g('price_per_head')) || 0,
+      cap:Math.max(2, parseInt(g('cap')) || 14), format:parseInt(g('format')) || 7, location_name:g('location_name'), location_address:g('location_address'),
+      location_url:g('location_url'), notes:g('notes'), bank_name:g('bank_name'), bank_sort:g('bank_sort'), bank_account:g('bank_account'), bank_ref:g('bank_ref') };
+    await API.saveSettings(p); toast('Defaults saved'); await reload(); },
+  'player-remove': async v => { const p = playerById(v);
+    if (!confirm(`Remove ${p?.name}? Their availability and payment history go too.`)) return;
+    await API.removePlayer(v); toast('Removed'); await reload(); },
+  'player-link': async v => { const t = await API.playerToken(v); copy(location.origin + location.pathname + '?me=' + v + '.' + t); },
+  'demo-reset': () => { if (confirm('Reset the demo data?')) Mock.reset(); },
+};
+
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]');
+  if (!el || el.type === 'checkbox') return;
+  if (el.tagName === 'A') e.preventDefault();
+  const fn = H[el.dataset.act]; if (!fn) return;
+  if (el.tagName === 'BUTTON') el.disabled = true;
+  try { await fn(el.dataset.v, el); }
+  catch (err) { toast(err.message || String(err), true); }
+  finally { if (el.isConnected) el.disabled = false; }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'hostPw') H['host-login']().catch(err => toast(err.message, true)); });
+document.addEventListener('change', async e => {
+  const el = e.target; const act = el.dataset?.act; if (!act) return;
+  try {
+    if (act === 'quick'){ S.quick = el.checked; return; }
+    if (act === 'paid' || act === 'waive'){
+      const [pid, day] = el.dataset.v.split('|');
+      await API.setPayment(pid, day, act === 'paid' ? el.checked : null, act === 'waive' ? el.checked : null);
+      await reload();
+    }
+  } catch (err) { toast(err.message, true); el.checked = !el.checked; }
+});
+// Auto split per head when total or max players change
+document.addEventListener('input', e => {
+  const id = e.target.id;
+  if (id === 'f_total' || id === 'f_cap'){ const h = document.getElementById('f_head'); if (h) h.value = splitHead(val('f_total'), parseInt(val('f_cap'))); }
+  if (id === 'st_price_total' || id === 'st_cap'){ const h = document.getElementById('st_price_per_head'); if (h) h.value = splitHead(val('st_price_total'), parseInt(val('st_cap'))); }
+});
+
+// Refresh quietly every 30s when nobody is typing
+setInterval(() => {
+  const a = document.activeElement;
+  if (document.hidden || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.tab === 'me' || S.tab === 'setup' || S.pick || Object.keys(S.teamsDraft).length) return;
+  if (S.sel && S.plus[S.sel] !== undefined) return;
+  reload().catch(() => {});
+}, 30000);
+
+(async function init(){
+  try {
+    if (!DEMO) sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+    if (S.hostKey){
+      S.isHost = await API.checkHost(S.hostKey);
+      try { S.isHost ? localStorage.setItem('fb_host', S.hostKey) : localStorage.removeItem('fb_host'); } catch {}
+      if (!S.isHost) { S.hostKey = null; if (qs.get('host')) toast('That host password is not valid', true); }
+      if (qs.get('host')) { qs.delete('host'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+    }
+    await reload();
+    if (!S.me && !S.isHost){ S.tab = 'me'; initProf(); render(); }
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="loading">Couldn't load. ${esc(err.message)}<br><br>
+      <span class="small">If you're the host, check the Supabase URL and key at the top of index.html, and that setup.sql has been run.</span></div>`;
+  }
+})();
+</script>
+</body>
+</html>
