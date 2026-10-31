@@ -74,7 +74,7 @@ h4{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.6px
 .stepper button{background:var(--card);border:0;width:36px;height:34px;font-size:18px}
 .stepper span{min-width:34px;text-align:center;font-weight:600}
 label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
-input[type=text],input[type=number],input[type=time],input[type=url],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px}
+input[type=text],input[type=password],input[type=number],input[type=time],input[type=url],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px}
 textarea{min-height:60px;resize:vertical}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px}
@@ -97,6 +97,9 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .tp .gk{font-size:10px;background:var(--warn);color:#2b1d00;border-radius:4px;padding:0 4px;margin-left:4px}
 .bank{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px;margin-top:8px}
 .linkbox{display:flex;gap:6px;margin:4px 0 12px} .linkbox input{flex:1}
+.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:420px;width:100%}
+.mbox p{margin:0 0 14px}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#fff;color:#111;padding:10px 16px;border-radius:10px;font-size:14px;box-shadow:0 6px 24px #0008;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;z-index:9}
 #toast.show{opacity:1} #toast.err{background:var(--bad);color:#fff}
 .loading{padding:60px 0;text-align:center;color:var(--muted)}
@@ -146,9 +149,26 @@ function toast(msg, err){
   t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', 3200);
 }
+function modal(html){
+  const d = document.createElement('div'); d.className = 'modal';
+  d.innerHTML = `<div class="mbox">${html}</div>`; document.body.appendChild(d); return d;
+}
+function ask(msg, okLabel = 'Yes'){
+  return new Promise(res => {
+    const d = modal(`<p>${esc(msg)}</p><div class="row" style="justify-content:flex-end"><button class="btn" data-m="0">Cancel</button><button class="btn primary" data-m="1">${esc(okLabel)}</button></div>`);
+    d.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (!b && e.target !== d) return; d.remove(); res(!!b && b.dataset.m === '1'); });
+  });
+}
 async function copy(text){
-  try { await navigator.clipboard.writeText(text); toast('Copied'); }
-  catch { prompt('Copy this:', text); }
+  try { await navigator.clipboard.writeText(text); return toast('Copied'); } catch {}
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta); ta.focus(); ta.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  if (ok) return toast('Copied');
+  const d = modal(`<p>Copy this link:</p><input type="text" readonly value="${esc(text)}"><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn primary" data-m="1">Done</button></div>`);
+  const inp = d.querySelector('input'); inp.focus(); inp.select();
+  d.addEventListener('click', e => { if (e.target.closest('[data-m]') || e.target === d) d.remove(); });
 }
 
 // Squad order: first come first served, +1s count as heads
@@ -686,8 +706,8 @@ async function pullOut(day){
   if (sess && r){
     const sq = squad(day);
     if (sq.inS.includes(r) && new Date() >= cancelDeadline(sess)){
-      if (!confirm(`It's within ${sess.free_cancel_hours} hours of kick-off, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`)) return;
-    } else if (!confirm('Pull out of this session?')) return;
+      if (!(await ask(`It's within ${sess.free_cancel_hours} hours of kick-off, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`))) return;
+    } else if (!(await ask('Pull out of this session?'))) return;
   }
   const res = await API.setAvail({ player:S.me.id, token:S.me.token, day, on:false });
   toast(res === 'late_drop' ? 'Pulled out. Late pull-out, so your share is still due' : 'Updated');
@@ -718,7 +738,7 @@ const H = {
   'host-add': async v => { const pid = val('hostAdd'); if (!pid) return;
     await API.setAvail({ player:pid, token:null, day:v, on:true }); toast('Added'); await reload(); },
   'host-clear': async v => { const [pid, day] = v.split('|'); const p = playerById(pid);
-    if (!confirm(`Remove ${p?.name || 'this player'} from ${fmtShort(day)}? They won't be charged.`)) return;
+    if (!(await ask(`Remove ${p?.name || 'this player'} from ${fmtShort(day)}? They won't be charged.`))) return;
     await API.clearAvail(pid, day); toast('Removed'); await reload(); },
   'sess-save': async v => {
     const p = { day:v, kickoff:val('f_kickoff'), hours:Number(val('f_hours'))||1, price_total:Number(val('f_total'))||0, price_per_head:Number(val('f_head'))||0,
@@ -726,7 +746,7 @@ const H = {
       location_name:val('f_lname'), location_address:val('f_laddr'), location_url:val('f_lurl'), notes:val('f_notes') };
     if (!p.kickoff) return toast('Add a kick-off time', true);
     await API.upsertSession(p); toast(sessionOn(v) ? 'Session updated' : 'Session booked'); await reload(); },
-  'sess-cancel': async v => { if (!confirm(`Cancel the session on ${fmtShort(v)}? Late pull-out charges for it are cleared.`)) return;
+  'sess-cancel': async v => { if (!(await ask(`Cancel the session on ${fmtShort(v)}? Late pull-out charges for it are cleared.`))) return;
     await API.cancelSession(v); delete S.teamsDraft[v]; toast('Session cancelled'); await reload(); },
   'teams-gen': v => { S.teamsDraft[v] = makeTeams(teamPool(v)); S.pick = null; render(); },
   'teams-discard': v => { delete S.teamsDraft[v]; S.pick = null; render(); },
@@ -757,7 +777,7 @@ const H = {
     await reload();
     if (isNew){ S.tab = 'cal'; S.quick = true; render(); }
   },
-  'prof-forget': () => { if (!confirm('Sign out on this device? You can get back in with your personal link.')) return;
+  'prof-forget': async () => { if (!(await ask('Sign out on this device? You can get back in with your personal link.'))) return;
     S.me = null; try { localStorage.removeItem('fb_me'); } catch {} initProf(); render(); },
   'copy': v => copy(v),
   'host-login': async () => {
@@ -781,10 +801,10 @@ const H = {
       location_url:g('location_url'), notes:g('notes'), bank_name:g('bank_name'), bank_sort:g('bank_sort'), bank_account:g('bank_account'), bank_ref:g('bank_ref') };
     await API.saveSettings(p); toast('Defaults saved'); await reload(); },
   'player-remove': async v => { const p = playerById(v);
-    if (!confirm(`Remove ${p?.name}? Their availability and payment history go too.`)) return;
+    if (!(await ask(`Remove ${p?.name}? Their availability and payment history go too.`))) return;
     await API.removePlayer(v); toast('Removed'); await reload(); },
   'player-link': async v => { const t = await API.playerToken(v); copy(location.origin + location.pathname + '?me=' + v + '.' + t); },
-  'demo-reset': () => { if (confirm('Reset the demo data?')) Mock.reset(); },
+  'demo-reset': async () => { if (await ask('Reset the demo data?')) Mock.reset(); },
 };
 
 document.addEventListener('click', async e => {
