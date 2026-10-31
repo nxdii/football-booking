@@ -66,6 +66,8 @@ input[type=time]{color-scheme:dark}
 .heat{display:flex;gap:3px;margin:6px 0 10px}
 .hs{flex:1;position:relative;text-align:center;border-radius:6px;overflow:hidden;background:var(--card2);padding:4px 0;border:2px solid transparent}
 .hs.ko{border-color:var(--text)}
+.hs{cursor:pointer;color:inherit;font:inherit}.hs.hsel{border-color:var(--warn)}
+.whobox{background:var(--card2);border-radius:10px;padding:8px 10px;font-size:14px;margin:0 0 10px}
 .hs .hb{position:absolute;inset:0;background:var(--accent)}
 .hs span,.hs small{position:relative;display:block;line-height:1.2}.hs span{font-weight:700;font-size:13px}.hs small{font-size:10px;color:var(--text)}
 .slots button{padding:6px 10px;font-size:13px}
@@ -226,7 +228,7 @@ const S = {
   me: null, isHost:false, hostKey: qs.get('host') || (()=>{ try { return localStorage.getItem('fb_host'); } catch { return null; } })(),
   groupPwRequired:false, groupPw:'',
   tab:'cal', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-  sel:null, quick:false, proposeMode:false, picks:new Set(), slotDraft:{}, plus:{}, prof:null, teamsDraft:{}, pick:null,
+  sel:null, quick:false, proposeMode:false, picks:new Set(), slotDraft:{}, heatSel:{}, plus:{}, prof:null, teamsDraft:{}, pick:null,
 };
 try { S.me = JSON.parse(localStorage.getItem('fb_me') || 'null'); } catch {}
 if (qs.get('me')) {
@@ -478,11 +480,19 @@ function viewCal(){
     <section id="dayPanel">${right}</section></div>`;
 }
 
+function hourRanges(sl){
+  const a = [...sl].sort((x, y) => x - y), out = []; let st = null, pr = null;
+  for (const h of a){ if (st === null){ st = pr = h; } else if (h === pr + 1){ pr = h; } else { out.push([st, pr + 1]); st = pr = h; } }
+  if (st !== null) out.push([st, pr + 1]);
+  return out.map(([x, y]) => `${pad(x % 24)}–${pad(y % 24)}`).join(', ');
+}
 function personLine(r, tag, host){
   const p = playerById(r.player_id); if (!p) return '';
+  const sess = sessionOn(r.day);
+  const hrs = sess && windowSlots(sess).length > 1 ? `<br><span class="small muted">🕒 ${r.slots && r.slots.length ? hourRanges(r.slots) : 'any time'}</span>` : '';
   const plus = r.plus_ones ? ` <span class="muted">+${r.plus_ones}${r.plus_one_names ? ' (' + esc(r.plus_one_names) + ')' : ''}</span>` : '';
   const roles = ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('');
-  return `<div class="person"><div><span class="pname">${esc(p.name)}</span>${plus}<br><span class="stars">${stars(p.skill)}</span> ${roles}</div>
+  return `<div class="person"><div><span class="pname">${esc(p.name)}</span>${plus}<br><span class="stars">${stars(p.skill)}</span> ${roles}${hrs}</div>
     <div class="row">${tag || ''}${host ? `<button class="btn small danger" title="Remove from this day (no charge)" data-act="host-clear" data-v="${r.player_id}|${r.day}">✕</button>` : ''}</div></div>`;
 }
 
@@ -507,9 +517,15 @@ function slotHeat(s, sq){
   const rows = sq.inS.concat(sq.wait);
   const counts = slots.map(h => rows.reduce((c, r) => c + (rowSlots(s, r).includes(h) ? 1 + r.plus_ones : 0), 0));
   const max = Math.max(1, ...counts), need = timeSet(s) ? neededSlots(s) : [];
-  return `<div class="heat">${slots.map((h, i) => `<div class="hs ${need.includes(h) ? 'ko' : ''}" title="${counts[i]} free ${slotLabel(h)}–${slotLabel(h+1)}">
-      <div class="hb" style="opacity:${counts[i] ? .25 + .75 * counts[i] / max : .08}"></div><span>${counts[i]}</span><small>${pad(h % 24)}</small></div>`).join('')}</div>
-    <div class="small muted" style="margin:-4px 0 12px">People free each hour${need.length ? ' · outlined hours are the kick-off' : ''}</div>`;
+  const sel = S.heatSel[s.day];
+  let who = '';
+  if (sel !== undefined && slots.includes(sel)){
+    const names = rows.filter(r => rowSlots(s, r).includes(sel)).map(r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; }).filter(Boolean);
+    who = `<div class="whobox"><b>Free ${slotLabel(sel)}–${slotLabel(sel + 1)}:</b> ${names.length ? names.join(', ') : '<span class="muted">nobody yet</span>'}</div>`;
+  }
+  return `<div class="heat">${slots.map((h, i) => `<button class="hs ${need.includes(h) ? 'ko' : ''} ${sel === h ? 'hsel' : ''}" data-act="heat" data-v="${s.day}|${h}" title="${counts[i]} free ${slotLabel(h)}–${slotLabel(h+1)}">
+      <div class="hb" style="opacity:${counts[i] ? .25 + .75 * counts[i] / max : .08}"></div><span>${counts[i]}</span><small>${pad(h % 24)}</small></button>`).join('')}</div>
+    ${who}<div class="small muted" style="margin:-4px 0 12px">People free each hour, tap an hour to see who${need.length ? ' · outlined hours are the kick-off' : ''}</div>`;
 }
 
 function sessionInfo(s){
@@ -891,6 +907,7 @@ const H = {
     const n = Math.max(0, Math.min(5, (S.plus[day] ?? (r ? r.plus_ones : 0)) + Number(v)));
     S.plus[day] = n; document.getElementById('plusN').textContent = n; syncPlusUI(); },
   'avail-on': async v => { await setMine(v, true); delete S.plus[v]; delete S.slotDraft[v]; toast('Saved'); await reload(); },
+  'heat': v => { const [day, h] = v.split('|'); const n = Number(h); S.heatSel[day] = S.heatSel[day] === n ? undefined : n; render(); },
   'slot': (v, el) => { const [day, h] = v.split('|'); const sess = sessionOn(day);
     const set = S.slotDraft[day] || (S.slotDraft[day] = new Set(rowSlots(sess, myRow(day))));
     const n = Number(h); set.has(n) ? set.delete(n) : set.add(n); el.classList.toggle('on', set.has(n)); },
