@@ -71,6 +71,24 @@ input[type=time]{color-scheme:dark}
 .hs .hb{position:absolute;inset:0;background:var(--accent)}
 .hs span,.hs small{position:relative;display:block;line-height:1.2}.hs span{font-weight:700;font-size:13px}.hs small{font-size:10px;color:var(--text)}
 .slots button{padding:6px 10px;font-size:13px}
+.seg{margin-bottom:12px}
+.gwrap{display:grid;gap:16px}
+@media(min-width:860px){.gwrap{grid-template-columns:1fr 1fr}.seg{display:none}}
+@media(max-width:859px){.gwrap.show-mine .group-pane,.gwrap.show-group .mine-pane{display:none}}
+.gpane{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;overflow-x:auto}
+.gpane h3{margin:0 0 4px;font-size:16px}
+.agrid{display:grid;gap:2px;min-width:max-content;user-select:none;-webkit-user-select:none}
+.agrid.paint{touch-action:none}
+.gh{font-size:11px;text-align:center;color:var(--muted);padding-bottom:4px;line-height:1.3}
+.gh b{color:var(--text)}
+.gt{font-size:11px;color:var(--muted);text-align:right;padding-right:6px;line-height:26px}
+.gc{height:26px;border-radius:4px;background:var(--card2);cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;color:var(--accent-ink)}
+.gc.on{background:var(--accent)}
+.gc.lock{cursor:not-allowed;opacity:.5}
+.gc.off{background:none;cursor:default}
+.gc.g{background:color-mix(in srgb, var(--accent) calc(var(--a) * 100%), var(--card2))}
+.gc.ko{outline:2px solid var(--text);outline-offset:-2px}
+.gc.gsel{outline:2px solid var(--warn);outline-offset:-2px}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:5px}
 .sw{width:14px;height:14px;border-radius:4px;display:inline-block}
@@ -228,7 +246,7 @@ const S = {
   me: null, isHost:false, hostKey: qs.get('host') || (()=>{ try { return localStorage.getItem('fb_host'); } catch { return null; } })(),
   groupPwRequired:false, groupPw:'',
   tab:'cal', month: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-  sel:null, quick:false, proposeMode:false, picks:new Set(), slotDraft:{}, heatSel:{}, plus:{}, prof:null, teamsDraft:{}, pick:null,
+  sel:null, quick:false, proposeMode:false, picks:new Set(), slotDraft:{}, heatSel:{}, availView:'mine', gSel:null, plus:{}, prof:null, teamsDraft:{}, pick:null,
 };
 try { S.me = JSON.parse(localStorage.getItem('fb_me') || 'null'); } catch {}
 if (qs.get('me')) {
@@ -394,7 +412,7 @@ async function reload(){
 function render(){
   const app = document.getElementById('app');
   if (!S.settings) return;
-  const tabs = [['cal','Calendar'],['sess','Sessions'],['me', S.me ? 'My profile' : 'Join']];
+  const tabs = [['cal','Calendar'],['avail','Availability'],['sess','Sessions'],['me', S.me ? 'My profile' : 'Join']];
   if (S.isHost) tabs.push(['setup','Host setup']);
   const who = S.isHost ? '<span class="role host">Host</span>' : `<span class="role">${S.me && meP() ? esc(meP().name) : 'Not signed up'}</span>`;
   const scrollY = window.scrollY;
@@ -402,7 +420,7 @@ function render(){
     ${DEMO ? `<div class="demo">Demo mode, data only saves in this browser. ${S.isHost ? '' : 'Host password is <b>demo</b>.'} · <a href="#" data-act="demo-reset">Reset demo</a></div>` : ''}
     <header><h1>⚽ ${esc(S.settings.group_name)}</h1>${who}</header>
     <nav>${tabs.map(([k,l]) => `<button data-act="tab" data-v="${k}" class="${S.tab===k?'on':''}">${l}</button>`).join('')}</nav>
-    <main>${S.tab==='cal' ? viewCal() : S.tab==='sess' ? viewSessions() : S.tab==='me' ? viewProfile() : S.tab==='login' ? viewLogin() : viewSetup()}</main>
+    <main>${S.tab==='cal' ? viewCal() : S.tab==='avail' ? viewAvail() : S.tab==='sess' ? viewSessions() : S.tab==='me' ? viewProfile() : S.tab==='login' ? viewLogin() : viewSetup()}</main>
     <footer style="text-align:center;margin-top:24px">${S.isHost
       ? '<button class="btn small" data-act="host-logout">Log out of host mode</button>'
       : (S.tab === 'login' ? '' : '<button class="btn small" data-act="tab" data-v="login" style="opacity:.7">Host login</button>')}</footer>`;
@@ -460,9 +478,9 @@ function viewCal(){
   if (S.isHost){
     top = proposing
       ? `<div class="quick" style="justify-content:space-between"><span><b>Propose days:</b> tap the days you can do. ${S.picks.size} selected</span><button class="btn" data-act="propose-mode" data-v="0">Done</button></div>`
-      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="propose-mode" data-v="1">+ Propose days</button>${S.me ? `<label class="small muted"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mark myself in/out</label>` : `<button class="btn" data-act="tab" data-v="me">Join as a player too</button>`}</div>`;
+      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="propose-mode" data-v="1">+ Propose days</button><button class="btn" data-act="tab" data-v="avail">Availability grid</button>${S.me ? '' : `<button class="btn" data-act="tab" data-v="me">Join as a player too</button>`}</div>`;
   } else if (S.me){
-    top = `<label class="quick"><input type="checkbox" data-act="quick" ${S.quick?'checked':''}> Quick mode: tap a proposed day to say you're in or out</label>`;
+    top = `<div class="quick" style="justify-content:space-between"><span>Fill in the hours you're free for all the proposed days at once</span><button class="btn primary" data-act="tab" data-v="avail">Open grid</button></div>`;
   } else {
     top = `<div class="note">Join first so you can say which games you're in for. <button class="btn primary" data-act="tab" data-v="me">Join</button></div>`;
   }
@@ -560,7 +578,7 @@ function myControls(day, sess, sq){
   }
   const n = S.plus[day] ?? (r ? r.plus_ones : 0);
   const ws = windowSlots(sess);
-  const chosen = S.slotDraft[day] || new Set(rowSlots(sess, r));
+  const chosen = S.slotDraft[day] || new Set(r && r.slots ? r.slots : []);
   const picker = ws.length > 1 ? `<div class="small muted" style="margin-bottom:6px">${timeSet(sess) ? 'Hours you can do' : 'Tap the hours that suit you'}</div>
     <div class="choice slots">${ws.map(h => `<button class="${chosen.has(h) ? 'on' : ''}" data-act="slot" data-v="${day}|${h}">${slotLabel(h)}</button>`).join('')}</div>` : '';
   return `<div class="mine-box">
@@ -661,6 +679,83 @@ function viewDay(day){
   if (sq.late.length) h += `<h4>Pulled out after booking</h4>` + sq.late.map(r => personLine(r, '<span class="tag late">owes</span>', host)).join('');
   if (host) h += hostDayForm(day, sess);
   return h + '</div>';
+}
+
+// ----- availability grid (When2meet style)
+function availDays(){ const t = todayISO(); return S.sessions.filter(x => x.day >= t && new Date() < kickoffDate(x)); }
+function canPaint(sess){
+  if (!S.me) return 'Join first so you can add your hours';
+  const r = myRow(sess.day);
+  if (r && r.status === 'late_drop') return 'You pulled out of this game. Open the day to rejoin';
+  if (!r && confirmsClosed(sess) && !S.isHost) return 'Confirmations for this game have closed';
+  return '';
+}
+function viewAvail(){
+  const days = availDays();
+  if (!days.length) return `<div class="note">No games proposed yet. ${S.isHost ? 'Go to the calendar and tap "Propose days".' : 'Check back soon.'}</div>`;
+  let lo = 99, hi = 0;
+  days.forEach(x => { const w = windowSlots(x); lo = Math.min(lo, w[0]); hi = Math.max(hi, w[w.length - 1]); });
+  const hours = []; for (let h = lo; h <= hi; h++) hours.push(h);
+  const cols = `grid-template-columns:44px repeat(${days.length}, minmax(44px, 1fr))`;
+  const head = `<div class="gh"></div>` + days.map(x => `<div class="gh"><b>${parseISO(x.day).toLocaleDateString('en-GB',{weekday:'short'})}</b><br>${parseISO(x.day).getDate()} ${parseISO(x.day).toLocaleDateString('en-GB',{month:'short'})}${isBooked(x) ? ' ⚽' : ''}</div>`).join('');
+  // mine
+  let mine = head;
+  hours.forEach(h => {
+    mine += `<div class="gt">${pad(h % 24)}:00</div>`;
+    days.forEach(x => {
+      const inWin = windowSlots(x).includes(h);
+      const set = S.slotDraft[x.day] || new Set(myRow(x.day)?.slots || []);
+      const lock = canPaint(x);
+      mine += inWin ? `<div class="gc ${set.has(h) ? 'on' : ''} ${lock ? 'lock' : ''}" data-cell="${x.day}|${h}"></div>` : `<div class="gc off"></div>`;
+    });
+  });
+  // everyone
+  const maxHeads = Math.max(1, ...days.flatMap(x => { const sq = squad(x.day), rows = sq.inS.concat(sq.wait); return windowSlots(x).map(h => rows.reduce((c, r) => c + (rowSlots(x, r).includes(h) ? 1 + r.plus_ones : 0), 0)); }));
+  let grp = head;
+  hours.forEach(h => {
+    grp += `<div class="gt">${pad(h % 24)}:00</div>`;
+    days.forEach(x => {
+      if (!windowSlots(x).includes(h)) { grp += `<div class="gc off"></div>`; return; }
+      const sq = squad(x.day), rows = sq.inS.concat(sq.wait);
+      const n = rows.reduce((c, r) => c + (rowSlots(x, r).includes(h) ? 1 + r.plus_ones : 0), 0);
+      const ko = timeSet(x) && neededSlots(x).includes(h);
+      grp += `<div class="gc g ${ko ? 'ko' : ''} ${S.gSel === x.day + '|' + h ? 'gsel' : ''}" data-g="${x.day}|${h}" style="--a:${n ? .15 + .85 * n / maxHeads : 0}">${n || ''}</div>`;
+    });
+  });
+  const tabsSm = `<div class="row seg"><button class="btn ${S.availView !== 'group' ? 'primary' : ''}" data-act="avail-view" data-v="mine">Your hours</button><button class="btn ${S.availView === 'group' ? 'primary' : ''}" data-act="avail-view" data-v="group">Everyone</button></div>`;
+  return `${!S.me ? `<div class="note">Join first so you can paint your hours. <button class="btn primary" data-act="tab" data-v="me">Join</button></div>` : ''}
+    ${tabsSm}
+    <div class="gwrap ${S.availView === 'group' ? 'show-group' : 'show-mine'}">
+      <section class="gpane mine-pane"><h3>Your hours</h3><p class="muted small">Click or drag to paint when you're free. Saves as you go.</p>
+        <div class="agrid paint" style="${cols}">${mine}</div></section>
+      <section class="gpane group-pane"><h3>Everyone</h3><p class="muted small">Darker means more people. Tap or hover a block to see who.</p>
+        <div class="agrid" style="${cols}">${grp}</div>
+        <div id="gInfo" class="whobox" style="margin-top:10px">${S.gSel ? gInfo(S.gSel) : '<span class="muted">Tap a block to see who\'s free</span>'}</div></section>
+    </div>
+    <p class="muted small" style="margin-top:12px">Bringing a +1? Open the day on the Calendar to add them.</p>`;
+}
+function gInfo(key){
+  const [day, hs] = key.split('|'), h = Number(hs), x = sessionOn(day); if (!x) return '';
+  const sq = squad(day), rows = sq.inS.concat(sq.wait);
+  const nm = r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; };
+  const yes = rows.filter(r => rowSlots(x, r).includes(h)).map(nm).filter(Boolean);
+  const no = rows.filter(r => !rowSlots(x, r).includes(h)).map(nm).filter(Boolean);
+  const none = S.players.filter(p => !dayRows(day).some(r => r.player_id === p.id)).map(p => esc(p.name));
+  return `<b>${fmtShort(day)}, ${slotLabel(h)}–${slotLabel(h + 1)}</b><br>
+    <span style="color:var(--accent)">Free (${yes.length}):</span> ${yes.join(', ') || '<span class="muted">nobody</span>'}<br>
+    <span style="color:var(--warn)">Not free:</span> ${no.join(', ') || '<span class="muted">nobody</span>'}
+    ${none.length ? `<br><span class="muted">Not answered: ${none.join(', ')}</span>` : ''}`;
+}
+async function saveDays(days){
+  for (const day of days){
+    const x = sessionOn(day), r = myRow(day), sl = [...(S.slotDraft[day] || [])].sort((a, b) => a - b);
+    try {
+      if (sl.length) await API.setAvail({ player:S.me.id, token:S.me.token, day, on:true, slots:sl, plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 });
+      else if (r) await pullOut(day);
+    } catch (e) { toast(e.message, true); }
+    delete S.slotDraft[day];
+  }
+  toast('Saved'); await reload();
 }
 
 // ----- teams
@@ -858,7 +953,8 @@ function viewSetup(){
 // ---------------------------------------------------------------- actions
 function slotsFor(day){
   const sess = sessionOn(day); if (!sess) return null;
-  const set = S.slotDraft[day] || new Set(rowSlots(sess, myRow(day)));
+  if (windowSlots(sess).length <= 1) return windowSlots(sess);
+  const set = S.slotDraft[day] || new Set(myRow(day)?.slots || []);
   return [...set].sort((a, b) => a - b);
 }
 async function setMine(day, on){
@@ -907,9 +1003,10 @@ const H = {
     const n = Math.max(0, Math.min(5, (S.plus[day] ?? (r ? r.plus_ones : 0)) + Number(v)));
     S.plus[day] = n; document.getElementById('plusN').textContent = n; syncPlusUI(); },
   'avail-on': async v => { await setMine(v, true); delete S.plus[v]; delete S.slotDraft[v]; toast('Saved'); await reload(); },
+  'avail-view': v => { S.availView = v; render(); },
   'heat': v => { const [day, h] = v.split('|'); const n = Number(h); S.heatSel[day] = S.heatSel[day] === n ? undefined : n; render(); },
   'slot': (v, el) => { const [day, h] = v.split('|'); const sess = sessionOn(day);
-    const set = S.slotDraft[day] || (S.slotDraft[day] = new Set(rowSlots(sess, myRow(day))));
+    const set = S.slotDraft[day] || (S.slotDraft[day] = new Set(myRow(day)?.slots || []));
     const n = Number(h); set.has(n) ? set.delete(n) : set.add(n); el.classList.toggle('on', set.has(n)); },
   'can-make': async v => { const sess = sessionOn(v), r = myRow(v);
     S.slotDraft[v] = new Set([...rowSlots(sess, r), ...neededSlots(sess)]);
@@ -977,9 +1074,9 @@ const H = {
       can:ROLES.filter(r => P.roles[r] === 'can'), cannot:ROLES.filter(r => P.roles[r] === 'cant') });
     const isNew = !S.me;
     if (res && res.token){ S.me = { id:res.id, token:res.token }; try { localStorage.setItem('fb_me', JSON.stringify(S.me)); } catch {} }
-    toast(isNew ? 'Welcome! Now tap the days you\'re free' : 'Saved');
+    toast(isNew ? 'Welcome! Now paint the hours you\'re free' : 'Saved');
     await reload();
-    if (isNew){ S.tab = 'cal'; S.quick = true; render(); }
+    if (isNew){ S.tab = S.isHost ? 'cal' : 'avail'; render(); }
   },
   'prof-forget': async () => { if (!(await ask('Sign out on this device? You can get back in with your personal link.'))) return;
     S.me = null; try { localStorage.removeItem('fb_me'); } catch {} initProf(); render(); },
@@ -1021,6 +1118,34 @@ document.addEventListener('click', async e => {
   catch (err) { toast(err.message || String(err), true); }
   finally { if (el.isConnected) el.disabled = false; }
 });
+// Paint availability by click or drag (mouse and touch)
+let paint = null;
+function paintCell(el){
+  if (!el || !paint) return;
+  const [day, hs] = el.dataset.cell.split('|'), h = Number(hs);
+  const set = S.slotDraft[day] || (S.slotDraft[day] = new Set(myRow(day)?.slots || []));
+  paint.mode ? set.add(h) : set.delete(h);
+  el.classList.toggle('on', paint.mode); paint.days.add(day);
+}
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('[data-cell]'); if (!el) return;
+  const x = sessionOn(el.dataset.cell.split('|')[0]); const why = x && canPaint(x);
+  if (why) return toast(why, true);
+  e.preventDefault();
+  paint = { mode: !el.classList.contains('on'), days: new Set() };
+  paintCell(el);
+});
+document.addEventListener('pointermove', e => {
+  if (paint){ const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-cell]'); if (el && !el.classList.contains('lock')) paintCell(el); return; }
+  const g = e.pointerType === 'mouse' && e.target.closest && e.target.closest('[data-g]');
+  if (g){ const info = document.getElementById('gInfo'); if (info) info.innerHTML = gInfo(g.dataset.g); }
+});
+document.addEventListener('pointerup', () => { if (!paint) return; const days = [...paint.days]; paint = null; if (days.length) saveDays(days); });
+document.addEventListener('click', e => {
+  const g = e.target.closest && e.target.closest('[data-g]'); if (!g) return;
+  S.gSel = g.dataset.g; document.querySelectorAll('.gc.gsel').forEach(c => c.classList.remove('gsel')); g.classList.add('gsel');
+  const info = document.getElementById('gInfo'); if (info) info.innerHTML = gInfo(S.gSel);
+});
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'hostPw') H['host-login']().catch(err => toast(err.message, true)); });
 document.addEventListener('change', async e => {
   const el = e.target; const act = el.dataset?.act; if (!act) return;
@@ -1043,7 +1168,7 @@ document.addEventListener('input', e => {
 // Refresh quietly every 30s when nobody is typing
 setInterval(() => {
   const a = document.activeElement;
-  if (document.hidden || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.tab === 'me' || S.tab === 'setup' || S.pick || Object.keys(S.teamsDraft).length) return;
+  if (paint || Object.keys(S.slotDraft).length || document.hidden || (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) || S.tab === 'me' || S.tab === 'setup' || S.pick || Object.keys(S.teamsDraft).length) return;
   if (S.sel && S.plus[S.sel] !== undefined) return;
   reload().catch(() => {});
 }, 30000);
