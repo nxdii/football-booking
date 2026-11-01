@@ -312,6 +312,7 @@ const Remote = {
   clearAvail: (player, day) => rpc('host_clear_availability', {p_group:G, p_key:S.hostKey, p_player:player, p_day:day}),
   removePlayer: player => rpc('host_remove_player', {p_group:G, p_key:S.hostKey, p_player:player}),
   playerToken: player => rpc('host_player_token', {p_group:G, p_key:S.hostKey, p_player:player}),
+  deleteGroup: confirm => rpc('host_delete_group', {p_group:G, p_key:S.hostKey, p_confirm:confirm}),
 };
 
 // Demo backend: same rules, stored in localStorage
@@ -407,6 +408,7 @@ const Mock = (() => {
       if (r){ if (paid !== null) r.paid = paid; if (waived !== null) r.waived = waived; } save(); },
     async clearAvail(player, day){ host(hk()); db.avail = db.avail.filter(a => !(a.player_id === player && a.day === day)); save(); },
     async removePlayer(player){ host(hk()); db.players = db.players.filter(p => p.id !== player); db.avail = db.avail.filter(a => a.player_id !== player); save(); },
+    async deleteGroup(c){ host(hk()); if ((c||'').trim().toLowerCase() !== G) throw new Error('Type the link name exactly to confirm'); store.del(KEY); },
     async playerToken(player){ host(hk()); return db.players.find(p => p.id === player)?.token; },
     reset(){ store.del(KEY); store.del(KEY_ME); store.del(KEY_HOST); location.href = location.pathname + location.search; },
   };
@@ -931,7 +933,7 @@ function viewLanding(){
     <section>
       <div class="card"><h3>Your groups</h3>
         ${mine.length ? mine.map(x => `<div class="person"><div><a class="pname" href="?g=${encodeURIComponent(x.id)}">${esc(x.name || x.id)}</a><br><span class="small muted">?g=${esc(x.id)}</span></div>
-          <span class="tag ${x.role === 'host' ? 'wait' : 'in'}">${x.role === 'host' ? 'Host' : 'Player'}</span></div>`).join('')
+          <div class="row"><span class="tag ${x.role === 'host' ? 'wait' : 'in'}">${x.role === 'host' ? 'Host' : 'Player'}</span><button class="btn small" title="Remove from this list" data-act="forget-group" data-v="${esc(x.id)}">✕</button></div></div>`).join('')
           : '<p class="muted" style="margin:0">Groups you join or host on this device show up here. Got a link from a friend? Just open it.</p>'}
       </div>
     </section>
@@ -997,7 +999,11 @@ function viewSetup(){
     ${S.players.map(p => `<div class="person"><div><span class="pname">${esc(p.name)}</span><br><span class="stars">${stars(p.skill)}</span>
       ${ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('')}</div>
       <div class="row"><button class="btn small" data-act="player-link" data-v="${p.id}" title="Copy their personal link">Their link</button>
-      <button class="btn small danger" data-act="player-remove" data-v="${p.id}">Remove</button></div></div>`).join('') || '<p class="muted">Nobody has joined yet.</p>'}</div>`;
+      <button class="btn small danger" data-act="player-remove" data-v="${p.id}">Remove</button></div></div>`).join('') || '<p class="muted">Nobody has joined yet.</p>'}</div>
+  <div class="card" style="border-color:#5a2a2a"><h3 style="color:var(--bad)">Delete group</h3>
+    <p class="muted small" style="margin-top:0">Permanently deletes <b>${esc(S.settings.group_name)}</b> and everything in it: players, games, hours and payments. This can't be undone.</p>
+    <label class="f">Type <b>${esc(G)}</b> to confirm</label>
+    <div class="linkbox"><input type="text" id="del_confirm" autocomplete="off"><button class="btn danger" data-act="group-delete">Delete group</button></div></div>`;
 }
 
 // ---------------------------------------------------------------- actions
@@ -1137,6 +1143,20 @@ const H = {
   'prof-forget': async () => { if (!(await ask('Sign out on this device? You can get back in with your personal link.'))) return;
     S.me = null; store.del(KEY_ME); initProf(); render(); },
   'copy': v => copy(v),
+  'group-delete': async () => {
+    const c = val('del_confirm').trim().toLowerCase();
+    if (c !== G) return toast(`Type ${G} exactly to confirm`, true);
+    if (!(await ask(`Really delete ${S.settings.group_name}? Everyone in it loses their games and history.`, 'Delete for good'))) return;
+    await API.deleteGroup(c);
+    store.del(KEY_HOST); store.del(KEY_ME);
+    store.set('fb_groups', JSON.stringify(myGroups().filter(x => x.id !== G)));
+    location.href = location.pathname;
+  },
+  'forget-group': async v => {
+    store.set('fb_groups', JSON.stringify(myGroups().filter(x => x.id !== v)));
+    store.del('fb_host_' + v); store.del('fb_me_' + v);
+    document.getElementById('app').innerHTML = viewLanding(); toast('Removed from this device');
+  },
   'group-create': async () => {
     const name = val('ng_name').trim(), id = slugify(val('ng_id') || name), pw = val('ng_pw'), gpw = val('ng_gpw').trim();
     if (!name) return toast('Give your group a name', true);
@@ -1245,7 +1265,7 @@ setInterval(() => {
     if (!DEMO) sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
     if (!G){ document.getElementById('app').innerHTML = viewLanding(); return; }
     const gi = await API.groupInfo(G);
-    if (!gi){ document.getElementById('app').innerHTML = viewNoGroup(); return; }
+    if (!gi){ store.set('fb_groups', JSON.stringify(myGroups().filter(x => x.id !== G))); document.getElementById('app').innerHTML = viewNoGroup(); return; }
     if (S.hostKey){
       S.isHost = await API.checkHost(S.hostKey);
       S.isHost ? store.set(KEY_HOST, S.hostKey) : store.del(KEY_HOST);
