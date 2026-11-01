@@ -199,7 +199,8 @@ function bestTimes(s, sq){
 const splitHead = (total, cap) => cap > 0 ? Math.ceil(Number(total)/cap*10)/10 : 0;
 const val = id => document.getElementById(id)?.value ?? '';
 const stars = n => '★'.repeat(n) + '<span style="opacity:.25">' + '★'.repeat(5-n) + '</span>';
-const mapLink = s => s.location_url || (s.location_address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(s.location_address) : '');
+const safeUrl = u => /^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '';
+const mapLink = s => safeUrl(s.location_url) || (s.location_address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(s.location_address) : '');
 
 function toast(msg, err){
   const t = document.getElementById('toast');
@@ -277,42 +278,51 @@ const meP = () => S.me && playerById(S.me.id);
 
 // ---------------------------------------------------------------- backends
 let sb = null;
+// Turn database rule names into plain English
+const FRIENDLY = {
+  settings_url:'The map link must start with https://', sessions_url:'The map link must start with https://',
+  settings_prices:'Prices must be between £0 and £1,000 per head', sessions_prices:'Prices must be between £0 and £1,000 per head',
+  settings_cap:'Max players must be 2 to 50, format 3 to 11-a-side', sessions_cap:'Max players must be 2 to 50, format 3 to 11-a-side',
+  settings_hours:'Game length must be between 0.5 and 8 hours', sessions_hours:'Game length must be between 0.5 and 8 hours',
+  sessions_window:'Your "free until" time must be after "free from"', settings_book_days:'Slots open must be 0 to 60 days before',
+  settings_text_len:'One of the boxes has too much text', sessions_text_len:'One of the boxes has too much text',
+  settings_name_len:'Group name must be 1 to 60 characters', players_name_len:'Names must be 1 to 40 characters',
+};
 async function rpc(name, params){
   const { data, error } = await sb.rpc(name, params);
-  if (error) throw new Error(error.message);
+  if (error){
+    const m = String(error.message || ''), c = (m.match(/constraint "([^"]+)"/) || [])[1];
+    throw new Error(c ? (FRIENDLY[c] || 'Some of those values aren\'t allowed') : m);
+  }
   return data;
 }
 const hk = () => S.isHost ? S.hostKey : null;
 
 const Remote = {
+  // One call returns only this group's data; names, hours and bank details only for members and the host
   async load(){
-    const since = iso(addDays(new Date(), -60));
-    const [a,b,c,d] = await Promise.all([
-      sb.from('settings').select('*').eq('group_id', G).single(),
-      sb.from('players_public').select('*').eq('group_id', G).order('name'),
-      sb.from('availability').select('*').eq('group_id', G).gte('day', since),
-      sb.from('sessions').select('*').eq('group_id', G).gte('day', since).order('day'),
-    ]);
-    for (const r of [a,b,c,d]) if (r.error) throw new Error(r.error.message);
-    return { settings:a.data, players:b.data, avail:c.data, sessions:d.data };
+    const d = await rpc('get_group', { p_group:G, p_player:S.me?.id || null, p_ptoken:S.me?.token || null, p_htoken:S.isHost ? S.hostKey : null });
+    if (!d) throw new Error('This group no longer exists');
+    return { settings:d.settings, players:d.players, avail:d.avail, sessions:d.sessions, groupMeta:d.group, isMember:d.is_member };
   },
-  checkHost: k => rpc('host_check', {p_group:G, p_key:k}),
-  groupInfo: id => rpc('group_info', {p_group:id}),
-  createGroup: o => rpc('create_group', {p_id:o.id, p_name:o.name, p_host_pw:o.hostPw, p_group_pw:o.groupPw||''}),
-  changeHostPassword: pw => rpc('host_change_password', {p_group:G, p_key:S.hostKey, p_new:pw}),
-  getGroupPassword: () => rpc('host_get_group_password', {p_group:G, p_key:S.hostKey}),
-  setGroupPassword: pw => rpc('host_set_group_password', {p_group:G, p_key:S.hostKey, p_pw:pw}),
-  savePlayer: o => rpc('save_player', {p_group:G, p_id:o.id||null, p_token:o.token||null, p_name:o.name, p_skill:o.skill, p_can:o.can, p_cannot:o.cannot, p_host_key:hk(), p_group_pw:o.groupPw||null}),
-  setAvail: o => rpc('set_availability', {p_player:o.player, p_token:o.token||null, p_day:o.day, p_on:o.on, p_plus:o.plus||0, p_plus_names:o.plusNames||'', p_plus_skill:o.plusSkill||3, p_host_key:hk(), p_slots:o.slots||null}),
-  saveSettings: p => rpc('host_save_settings', {p_group:G, p_key:S.hostKey, p}),
-  upsertSession: p => rpc('host_upsert_session', {p_group:G, p_key:S.hostKey, p}),
-  cancelSession: day => rpc('host_cancel_session', {p_group:G, p_key:S.hostKey, p_day:day}),
-  saveTeams: (day, teams) => rpc('host_save_teams', {p_group:G, p_key:S.hostKey, p_day:day, p_teams:teams}),
-  setPayment: (player, day, paid, waived) => rpc('host_set_payment', {p_group:G, p_key:S.hostKey, p_player:player, p_day:day, p_paid:paid, p_waived:waived}),
-  clearAvail: (player, day) => rpc('host_clear_availability', {p_group:G, p_key:S.hostKey, p_player:player, p_day:day}),
-  removePlayer: player => rpc('host_remove_player', {p_group:G, p_key:S.hostKey, p_player:player}),
-  playerToken: player => rpc('host_player_token', {p_group:G, p_key:S.hostKey, p_player:player}),
-  deleteGroup: confirm => rpc('host_delete_group', {p_group:G, p_key:S.hostKey, p_confirm:confirm}),
+  groupInfo: async id => { const d = await rpc('get_group', { p_group:id }); return d && d.group; },
+  checkHost: t => rpc('host_check', {p_group:G, p_token:t}),
+  hostLogin: pw => rpc('host_login', {p_group:G, p_pw:pw}),
+  hostLogout: () => rpc('host_logout', {p_group:G, p_token:S.hostKey}),
+  createGroup: o => rpc('create_group', {p_id:o.id, p_name:o.name, p_host_pw:o.hostPw, p_join_code:o.joinCode||''}),
+  changeHostPassword: (oldPw, newPw) => rpc('host_change_password', {p_group:G, p_token:S.hostKey, p_old:oldPw, p_new:newPw}),
+  setJoinCode: c => rpc('host_set_join_code', {p_group:G, p_token:S.hostKey, p_code:c}),
+  savePlayer: o => rpc('save_player', {p_group:G, p_id:o.id||null, p_token:o.token||null, p_name:o.name, p_skill:o.skill, p_can:o.can, p_cannot:o.cannot, p_htoken:hk(), p_join_code:o.joinCode||null}),
+  setAvail: o => rpc('set_availability', {p_player:o.player, p_token:o.token||null, p_day:o.day, p_on:o.on, p_plus:o.plus||0, p_plus_names:o.plusNames||'', p_plus_skill:o.plusSkill||3, p_htoken:hk(), p_slots:o.slots||null}),
+  saveSettings: p => rpc('host_save_settings', {p_group:G, p_token:S.hostKey, p}),
+  upsertSession: p => rpc('host_upsert_session', {p_group:G, p_token:S.hostKey, p}),
+  cancelSession: day => rpc('host_cancel_session', {p_group:G, p_token:S.hostKey, p_day:day}),
+  saveTeams: (day, teams) => rpc('host_save_teams', {p_group:G, p_token:S.hostKey, p_day:day, p_teams:teams}),
+  setPayment: (player, day, paid, waived) => rpc('host_set_payment', {p_group:G, p_token:S.hostKey, p_player:player, p_day:day, p_paid:paid, p_waived:waived}),
+  clearAvail: (player, day) => rpc('host_clear_availability', {p_group:G, p_token:S.hostKey, p_player:player, p_day:day}),
+  removePlayer: player => rpc('host_remove_player', {p_group:G, p_token:S.hostKey, p_player:player}),
+  resetPlayerLink: player => rpc('host_reset_player_link', {p_group:G, p_token:S.hostKey, p_player:player}),
+  deleteGroup: confirm => rpc('host_delete_group', {p_group:G, p_token:S.hostKey, p_confirm:confirm}),
 };
 
 // Demo backend: same rules, stored in localStorage
@@ -351,22 +361,23 @@ const Mock = (() => {
   db = db || seed();
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
   const clone = x => JSON.parse(JSON.stringify(x));
-  const isHost = k => !!k && k === db.hostKey;
+  const isHost = k => !!k && k === 'tok-' + db.hostKey;
   const host = k => { if (!isHost(k)) throw new Error('Host only'); };
   const delay = () => new Promise(r => setTimeout(r, 80));
   return {
-    async load(){ await delay(); return clone({ settings:db.settings, players:db.players.map(({token, ...p}) => p).sort((a,b)=>a.name.localeCompare(b.name)), avail:db.avail, sessions:db.sessions }); },
-    async checkHost(k){ return isHost(k); },
-    async groupInfo(id){ return { id, name:db.settings.group_name, needs_password:!!db.groupPw }; },
-    async createGroup(o){ if ((o.hostPw||'').length < 8) throw new Error('Host password needs at least 8 characters'); db.hostKey = o.hostPw; db.settings.group_name = o.name; save(); },
-    async changeHostPassword(pw){ host(hk()); if ((pw||'').length < 8) throw new Error('Use at least 8 characters'); db.hostKey = pw; save(); },
-    async getGroupPassword(){ host(hk()); return db.groupPw || ''; },
-    async setGroupPassword(pw){ host(hk()); db.groupPw = (pw||'').trim(); save(); },
+    async load(){ await delay(); return clone({ settings:db.settings, players:db.players.map(({token, ...p}) => p).sort((a,b)=>a.name.localeCompare(b.name)), avail:db.avail, sessions:db.sessions, groupMeta:{ id:G, name:db.settings.group_name, needs_join_code:!!db.groupPw }, isMember:true }); },
+    async groupInfo(id){ return { id, name:db.settings.group_name, needs_join_code:!!db.groupPw }; },
+    async checkHost(t){ return isHost(t); },
+    async hostLogin(pw){ return pw === db.hostKey ? 'tok-' + pw : null; },
+    async hostLogout(){},
+    async createGroup(o){ if ((o.hostPw||'').length < 8) throw new Error('Host password needs at least 8 characters'); db.hostKey = o.hostPw; db.groupPw = o.joinCode || ''; db.settings.group_name = o.name; save(); return 'tok-' + o.hostPw; },
+    async changeHostPassword(oldPw, pw){ host(hk()); if (oldPw !== db.hostKey) throw new Error('Your current password is wrong'); if ((pw||'').length < 8) throw new Error('Use at least 8 characters'); db.hostKey = pw; save(); },
+    async setJoinCode(c){ host(hk()); db.groupPw = (c||'').trim(); save(); },
     async savePlayer(o){
       if (!o.name.trim()) throw new Error('Please enter your name');
       if (db.players.some(p => p.name.trim().toLowerCase() === o.name.trim().toLowerCase() && p.id !== o.id))
         throw new Error("That name is already taken. If it's you, open your personal link or ask the host for it");
-      if (!o.id && db.groupPw && !isHost(hk()) && (o.groupPw||'') !== db.groupPw) throw new Error('Wrong group password. Ask the host for it');
+      if (!o.id && db.groupPw && !isHost(hk()) && (o.joinCode||'') !== db.groupPw) throw new Error('Wrong join code. Ask the host for it');
       if (!o.id){ const p = { id:uid(), token:uid(), name:o.name.trim(), skill:o.skill, can_play:o.can, cannot_play:o.cannot, created_at:new Date().toISOString() };
         db.players.push(p); save(); return { id:p.id, token:p.token }; }
       const p = db.players.find(p => p.id === o.id && (p.token === o.token || isHost(hk())));
@@ -409,17 +420,16 @@ const Mock = (() => {
     async clearAvail(player, day){ host(hk()); db.avail = db.avail.filter(a => !(a.player_id === player && a.day === day)); save(); },
     async removePlayer(player){ host(hk()); db.players = db.players.filter(p => p.id !== player); db.avail = db.avail.filter(a => a.player_id !== player); save(); },
     async deleteGroup(c){ host(hk()); if ((c||'').trim().toLowerCase() !== G) throw new Error('Type the link name exactly to confirm'); store.del(KEY); },
-    async playerToken(player){ host(hk()); return db.players.find(p => p.id === player)?.token; },
+    async resetPlayerLink(player){ host(hk()); const p = db.players.find(p => p.id === player); p.token = uid(); save(); return p.token; },
     reset(){ store.del(KEY); store.del(KEY_ME); store.del(KEY_HOST); location.href = location.pathname + location.search; },
   };
 })();
 
 const API = DEMO ? Mock : Remote;
 
-async function loadGroupPw(){ try { S.groupPwHost = await API.getGroupPassword(); if (S.tab === 'setup') render(); } catch {} }
 async function reload(){
-  const [d, gi] = await Promise.all([API.load(), API.groupInfo(G).catch(() => null)]);
-  Object.assign(S, d); S.groupPwRequired = !!(gi && gi.needs_password);
+  const d = await API.load();
+  Object.assign(S, d); S.groupPwRequired = !!(d.groupMeta && d.groupMeta.needs_join_code);
   if (S.me && !playerById(S.me.id)) { S.me = null; store.del(KEY_ME); }
   render();
 }
@@ -912,7 +922,7 @@ function viewProfile(){
   return `<div class="card"><h3>${p ? 'My profile' : 'Join the group'}</h3>
     ${p ? '' : '<p class="muted" style="margin-top:0">Takes 20 seconds. Then mark the days you\'re free on the calendar.</p>'}
     <label class="f">Your name</label><input type="text" id="pfName" value="${esc(P.name)}" maxlength="40">
-    ${!p && S.groupPwRequired && !S.isHost ? `<label class="f">Group password (ask the host)</label><input type="password" id="pfGroupPw" value="${esc(S.groupPw)}">` : ''}
+    ${!p && S.groupPwRequired && !S.isHost ? `<label class="f">Join code (ask the host)</label><input type="password" id="pfGroupPw" value="${esc(S.groupPw)}" autocomplete="off">` : ''}
     <label class="f">Skill level (be honest, it balances the teams)</label>
     <div class="choice">${[1,2,3,4,5].map(k => `<button class="${P.skill===k?'on':''}" data-act="skill" data-v="${k}">${k} · ${SKILLS[k]}</button>`).join('')}</div>
     <label class="f">Positions: tap once for "can play", twice for "can't play", again to clear</label>
@@ -970,12 +980,15 @@ function viewSetup(){
   const field = (id, label, v, type='text', extra='') => `<div><label class="f">${label}</label><input type="${type}" id="st_${id}" value="${esc(v)}" ${extra}></div>`;
   return `<div class="card"><h3>Links</h3>
     <label class="f">Share with friends</label><div class="linkbox"><input type="text" readonly value="${esc(base)}"><button class="btn primary" data-act="copy" data-v="${esc(base)}">Copy</button></div>
-    <p class="muted small" style="margin:0">Same link for you. Tap "Host login" at the bottom and enter your host password.</p></div>
+    <p class="muted small" style="margin:0">Same link for you. Tap "Host login" at the bottom and enter your host password. If someone loses their personal link, use "New link" under Players.</p></div>
   <div class="card"><h3>Passwords</h3>
-    <label class="f">Group password friends need to join (leave blank for none)</label>
-    <div class="linkbox"><input type="text" id="st_group_pw" value="${esc(S.groupPwHost ?? '')}" placeholder="${S.groupPwHost === undefined ? 'Loading…' : 'No password'}"><button class="btn" data-act="group-pw-save">Save</button></div>
-    <label class="f">Change your host password (at least 8 characters)</label>
-    <div class="linkbox"><input type="password" id="st_host_pw" autocomplete="new-password"><button class="btn" data-act="host-pw-save">Change</button></div></div>
+    <label class="f">Join code friends need to sign up · <b>${S.groupPwRequired ? 'a code is set' : 'no code, anyone with the link can join'}</b></label>
+    <p class="muted small" style="margin:0 0 6px">Codes are stored scrambled, so they can't be shown again. Type a new one to replace it, or leave blank and save to remove it.</p>
+    <div class="linkbox"><input type="text" id="st_group_pw" placeholder="New join code" autocomplete="off"><button class="btn" data-act="group-pw-save">Save</button></div>
+    <label class="f">Change your host password</label>
+    <input type="password" id="st_host_old" placeholder="Current password" autocomplete="current-password" style="margin-bottom:6px">
+    <div class="linkbox"><input type="password" id="st_host_pw" placeholder="New password (8+ characters)" autocomplete="new-password"><button class="btn" data-act="host-pw-save">Change</button></div>
+    <p class="muted small" style="margin:0">Changing it logs out every other device that's logged in as host.</p></div>
   <div class="card"><h3>Default session details</h3><p class="muted small" style="margin-top:0">Pre-filled whenever you propose games. You can still change them per game. Friends must confirm by 11pm the night before pitch slots open.</p>
     ${field('group_name','Group name',st.group_name)}
     <div class="grid3">
@@ -998,7 +1011,7 @@ function viewSetup(){
   <div class="card"><h3>Players · ${S.players.length}</h3>
     ${S.players.map(p => `<div class="person"><div><span class="pname">${esc(p.name)}</span><br><span class="stars">${stars(p.skill)}</span>
       ${ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('')}</div>
-      <div class="row"><button class="btn small" data-act="player-link" data-v="${p.id}" title="Copy their personal link">Their link</button>
+      <div class="row"><button class="btn small" data-act="player-link" data-v="${p.id}" title="Make them a new personal link">New link</button>
       <button class="btn small danger" data-act="player-remove" data-v="${p.id}">Remove</button></div></div>`).join('') || '<p class="muted">Nobody has joined yet.</p>'}</div>
   <div class="card" style="border-color:#5a2a2a"><h3 style="color:var(--bad)">Delete group</h3>
     <p class="muted small" style="margin-top:0">Permanently deletes <b>${esc(S.settings.group_name)}</b> and everything in it: players, games, hours and payments. This can't be undone.</p>
@@ -1039,7 +1052,7 @@ async function pullOut(day, opts = {}){
 }
 
 const H = {
-  'tab': v => { S.tab = v; if (v === 'me') initProf(); if (v === 'setup' && S.groupPwHost === undefined) loadGroupPw(); render(); window.scrollTo(0,0); },
+  'tab': v => { S.tab = v; if (v === 'me') initProf(); render(); window.scrollTo(0,0); },
   'month': v => { S.month = new Date(S.month.getFullYear(), S.month.getMonth() + Number(v), 1); render(); },
   'goto': v => { S.tab = 'cal'; S.sel = v; const d = parseISO(v); S.month = new Date(d.getFullYear(), d.getMonth(), 1); render();
     document.getElementById('dayPanel')?.scrollIntoView({behavior:'smooth'}); },
@@ -1082,6 +1095,7 @@ const H = {
     await API.clearAvail(pid, day); toast('Removed'); await reload(); },
   'sess-save': async v => {
     const p = { ...sessionOn(v), day:v, ...readSessionFields() };
+    if (p.location_url.trim() && !safeUrl(p.location_url)) return toast('The map link must start with https://', true);
     if (!p.window_start || !p.window_end) return toast('Add the times you\'re free', true);
     if (p.time_set && hm(p.kickoff) + p.hours > hm(p.window_end) + 1e-9) { if (!(await ask(`That kick-off runs past your window (${p.window_end}). Save anyway?`, 'Save'))) return; }
     const c = val('f_confirm'); if (c) p.confirm_by = new Date(c).toISOString();
@@ -1098,6 +1112,7 @@ const H = {
   'propose-clear': () => { S.picks.clear(); render(); },
   'propose-save': async () => {
     const f = readSessionFields(); if (!f.window_start || !f.window_end) return toast('Add the times you\'re free', true);
+    if (f.location_url.trim() && !safeUrl(f.location_url)) return toast('The map link must start with https://', true);
     if (hm(f.window_end) - hm(f.window_start) < f.hours) return toast('The window is shorter than the game', true);
     const days = [...S.picks].sort();
     for (const day of days){
@@ -1131,7 +1146,7 @@ const H = {
     const P = S.prof; P.name = val('pfName').trim();
     if (!P.name) return toast('Add your name', true);
     S.groupPw = val('pfGroupPw');
-    const res = await API.savePlayer({ id:S.me?.id, token:S.me?.token, name:P.name, skill:P.skill, groupPw:S.groupPw,
+    const res = await API.savePlayer({ id:S.me?.id, token:S.me?.token, name:P.name, skill:P.skill, joinCode:S.groupPw,
       can:ROLES.filter(r => P.roles[r] === 'can'), cannot:ROLES.filter(r => P.roles[r] === 'cant') });
     const isNew = !S.me;
     rememberGroup(G, S.settings.group_name, S.isHost ? 'host' : 'player');
@@ -1162,25 +1177,29 @@ const H = {
     if (!name) return toast('Give your group a name', true);
     if (id.length < 3) return toast('Link name needs at least 3 letters or numbers', true);
     if (pw.length < 8) return toast('Host password needs at least 8 characters', true);
-    await API.createGroup({ id, name, hostPw:pw, groupPw:gpw });
-    store.set('fb_host_' + id, pw); rememberGroup(id, name, 'host');
+    const tok = await API.createGroup({ id, name, hostPw:pw, joinCode:gpw });
+    store.set('fb_host_' + id, tok); rememberGroup(id, name, 'host');
     location.href = groupUrl(id);
   },
   'host-login': async () => {
     const pw = val('hostPw'); if (!pw) return toast('Enter the host password', true);
-    if (!(await API.checkHost(pw))) return toast('Wrong password', true);
-    S.hostKey = pw; S.isHost = true; store.set(KEY_HOST, pw); rememberGroup(G, S.settings.group_name, 'host');
-    S.tab = 'setup'; toast('Logged in as host'); await reload(); loadGroupPw();
+    const tok = await API.hostLogin(pw);
+    if (!tok) return toast('Wrong password', true);
+    S.hostKey = tok; S.isHost = true; store.set(KEY_HOST, tok); rememberGroup(G, S.settings.group_name, 'host');
+    S.tab = 'setup'; toast('Logged in as host'); await reload();
   },
-  'host-logout': () => { S.isHost = false; S.hostKey = null; S.groupPwHost = undefined; store.del(KEY_HOST);
+  'host-logout': async () => { try { await API.hostLogout(); } catch {} S.isHost = false; S.hostKey = null; store.del(KEY_HOST);
     if (S.tab === 'setup') S.tab = 'cal'; toast('Logged out of host mode'); render(); },
-  'host-pw-save': async () => { const pw = val('st_host_pw');
-    await API.changeHostPassword(pw); S.hostKey = pw; store.set(KEY_HOST, pw);
-    toast('Host password changed'); render(); },
-  'group-pw-save': async () => { const pw = val('st_group_pw').trim();
-    await API.setGroupPassword(pw); S.groupPwHost = pw; toast(pw ? 'Group password set' : 'Group password removed'); await reload(); },
+  'host-pw-save': async () => { const oldPw = val('st_host_old'), pw = val('st_host_pw');
+    if (!oldPw) return toast('Enter your current password', true);
+    if (pw.length < 8) return toast('New password needs at least 8 characters', true);
+    await API.changeHostPassword(oldPw, pw); toast('Host password changed'); render(); },
+  'group-pw-save': async () => { const c = val('st_group_pw').trim();
+    if (!c && !(await ask('Remove the join code? Anyone with the link will be able to sign up.', 'Remove code'))) return;
+    await API.setJoinCode(c); toast(c ? 'Join code set' : 'Join code removed'); await reload(); },
   'settings-save': async () => {
     const g = id => val('st_' + id);
+    if (g('location_url').trim() && !safeUrl(g('location_url'))) return toast('The map link must start with https://', true);
     const p = { group_name:g('group_name') || 'Football', default_kickoff:g('default_kickoff') || '19:00', default_window_end:g('default_window_end') || '22:00', default_hours:Number(g('default_hours')) || 1,
       book_days_before:Math.max(0, parseInt(g('book_days_before')) || 0), min_players:Math.max(0, parseInt(g('min_players')) || 0), price_total:Number(g('price_total')) || 0, price_per_head:Number(g('price_per_head')) || 0,
       cap:Math.max(2, parseInt(g('cap')) || 14), format:parseInt(g('format')) || 7, location_name:g('location_name'), location_address:g('location_address'),
@@ -1189,7 +1208,9 @@ const H = {
   'player-remove': async v => { const p = playerById(v);
     if (!(await ask(`Remove ${p?.name} from this group? Their hours and payment history go too. If they sign up again they'll get a fresh account and a new personal link.`, 'Remove'))) return;
     await API.removePlayer(v); toast('Removed'); await reload(); },
-  'player-link': async v => { const t = await API.playerToken(v); copy(groupUrl(G, '&me=' + v + '.' + t)); },
+  'player-link': async v => { const p = playerById(v);
+    if (!(await ask(`Make ${p?.name || 'them'} a new personal link? Their old link stops working, so send them the new one.`, 'Make new link'))) return;
+    const t = await API.resetPlayerLink(v); copy(groupUrl(G, '&me=' + v + '.' + t)); },
   'demo-reset': async () => { if (await ask('Reset the demo data?')) Mock.reset(); },
 };
 
@@ -1266,11 +1287,15 @@ setInterval(() => {
     if (!G){ document.getElementById('app').innerHTML = viewLanding(); return; }
     const gi = await API.groupInfo(G);
     if (!gi){ store.set('fb_groups', JSON.stringify(myGroups().filter(x => x.id !== G))); document.getElementById('app').innerHTML = viewNoGroup(); return; }
+    const urlPw = qs.get('host');
+    if (urlPw){ qs.delete('host'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+    if (urlPw && DEMO) S.hostKey = await API.hostLogin(urlPw);
     if (S.hostKey){
       S.isHost = await API.checkHost(S.hostKey);
+      // Devices from before this update stored the password itself: swap it for a login token
+      if (!S.isHost && !DEMO && !/^[0-9a-f]{64}$/.test(S.hostKey)){ const t = await API.hostLogin(S.hostKey).catch(() => null); if (t){ S.hostKey = t; S.isHost = true; } }
       S.isHost ? store.set(KEY_HOST, S.hostKey) : store.del(KEY_HOST);
-      if (!S.isHost) { S.hostKey = null; if (qs.get('host')) toast('That host password is not valid', true); }
-      if (qs.get('host')) { qs.delete('host'); history.replaceState(null, '', location.pathname + (qs.toString() ? '?' + qs : '')); }
+      if (!S.isHost) S.hostKey = null;
     }
     await reload();
     if (S.isHost) rememberGroup(G, S.settings.group_name, 'host'); else if (S.me) rememberGroup(G, S.settings.group_name, 'player');
