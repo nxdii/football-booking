@@ -664,8 +664,10 @@ function hostDayForm(day, sess){
     <div class="row">${isBooked(sess)
       ? `<button class="btn" data-act="sess-status" data-v="${day}|proposed">Undo booked</button>`
       : `<button class="btn primary" data-act="sess-status" data-v="${day}|booked">⚽ Mark pitch as booked</button>`}</div>
-    ${notOn.length ? `<div class="row" style="margin-top:10px"><select id="hostAdd" style="flex:1">${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
-      <button class="btn" data-act="host-add" data-v="${day}">Add to this game</button></div>` : ''}
+    ${notOn.length ? `<label class="f">Add someone to this game yourself (e.g. if they messaged you instead)</label>
+      <div class="row"><select id="hostAdd" style="flex:1"><option value="" selected disabled>Choose a player…</option>${notOn.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <button class="btn" data-act="host-add" data-v="${day}">Add</button></div>
+      <p class="muted small" style="margin:6px 0 0">To take someone out of this game, tap ✕ next to their name above. To remove them from the group completely, use Host setup → Players.</p>` : ''}
     <h4>Set kick-off</h4>
     ${(() => { const b = bestTimes(sess, squad(day)).slice(0, 3); return b.length ? `<div class="choice">${b.map(x => `<button data-act="pick-time" data-v="${day}|${hhmm(x.st)}">${hhmm(x.st)} · ${x.n} can make it</button>`).join('')}</div>` : ''; })()}
     <p class="muted small">Tap a suggestion to set the kick-off, or type a time below. People whose hours don't cover it get asked to confirm or pull out for free.</p>
@@ -1060,7 +1062,7 @@ const H = {
     delete S.slotDraft[v]; toast('Thanks, you\'re in'); await reload(); },
   'pick-time': v => { const [day, t] = v.split('|'); const el = document.getElementById('f_kickoff'); if (el){ el.value = t; el.scrollIntoView({behavior:'smooth', block:'center'}); toast(`Kick-off ${t}. Press Save changes to confirm`); } },
   'avail-off': async v => { await pullOut(v); delete S.plus[v]; await reload(); },
-  'host-add': async v => { const pid = val('hostAdd'); if (!pid) return;
+  'host-add': async v => { const pid = val('hostAdd'); if (!pid) return toast('Choose a player first', true);
     await API.setAvail({ player:pid, token:null, day:v, on:true }); toast('Added'); await reload(); },
   'host-clear': async v => { const [pid, day] = v.split('|'); const p = playerById(pid);
     if (!(await ask(`Remove ${p?.name || 'this player'} from ${fmtShort(day)}? They won't be charged.`))) return;
@@ -1158,7 +1160,7 @@ const H = {
       location_url:g('location_url'), notes:g('notes'), bank_name:g('bank_name'), bank_sort:g('bank_sort'), bank_account:g('bank_account'), bank_ref:g('bank_ref') };
     await API.saveSettings(p); toast('Defaults saved'); await reload(); },
   'player-remove': async v => { const p = playerById(v);
-    if (!(await ask(`Remove ${p?.name}? Their availability and payment history go too.`))) return;
+    if (!(await ask(`Remove ${p?.name} from this group? Their hours and payment history go too. If they sign up again they'll get a fresh account and a new personal link.`, 'Remove'))) return;
     await API.removePlayer(v); toast('Removed'); await reload(); },
   'player-link': async v => { const t = await API.playerToken(v); copy(groupUrl(G, '&me=' + v + '.' + t)); },
   'demo-reset': async () => { if (await ask('Reset the demo data?')) Mock.reset(); },
