@@ -530,11 +530,19 @@ function hourRanges(sl){
   if (st !== null) out.push([st, pr + 1]);
   return out.map(([x, y]) => `${pad(x % 24)}–${pad(y % 24)}`).join(', ');
 }
+function guestList(r){
+  if (!r.plus_ones) return '';
+  const names = (r.plus_one_names || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, r.plus_ones).map(esc);
+  const extra = r.plus_ones - names.length;
+  if (extra) names.push(`${extra} ${names.length ? 'more' : (extra > 1 ? 'guests' : 'guest')}`);
+  return ` <span class="muted">+ ${names.join(', ')}</span>`;
+}
+const nameWithGuests = r => { const p = playerById(r.player_id); return p ? esc(p.name) + guestList(r) : ''; };
 function personLine(r, tag, host){
   const p = playerById(r.player_id); if (!p) return '';
   const sess = sessionOn(r.day);
   const hrs = sess && windowSlots(sess).length > 1 ? `<br><span class="small muted">🕒 ${r.slots && r.slots.length ? hourRanges(r.slots) : 'any time'}</span>` : '';
-  const plus = r.plus_ones ? ` <span class="muted">+${r.plus_ones}${r.plus_one_names ? ' (' + esc(r.plus_one_names) + ')' : ''}</span>` : '';
+  const plus = guestList(r);
   const roles = ROLES.map(x => p.can_play.includes(x) ? `<span class="chip can">${x}</span>` : p.cannot_play.includes(x) ? `<span class="chip cant">${x}</span>` : '').join('');
   return `<div class="person"><div><span class="pname">${esc(p.name)}</span>${plus}<br><span class="stars">${stars(p.skill)}</span> ${roles}${hrs}</div>
     <div class="row">${tag || ''}${host ? `<button class="btn small danger" title="Remove from this day (no charge)" data-act="host-clear" data-v="${r.player_id}|${r.day}">✕</button>` : ''}</div></div>`;
@@ -564,8 +572,8 @@ function slotHeat(s, sq){
   const sel = S.heatSel[s.day];
   let who = '';
   if (sel !== undefined && slots.includes(sel)){
-    const names = rows.filter(r => rowSlots(s, r).includes(sel)).map(r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; }).filter(Boolean);
-    who = `<div class="whobox"><b>Free ${slotLabel(sel)}–${slotLabel(sel + 1)}:</b> ${names.length ? names.join(', ') : '<span class="muted">nobody yet</span>'}</div>`;
+    const names = rows.filter(r => rowSlots(s, r).includes(sel)).map(nameWithGuests).filter(Boolean);
+    who = `<div class="whobox"><b>Free ${slotLabel(sel)}–${slotLabel(sel + 1)}:</b> ${names.length ? names.join(' · ') : '<span class="muted">nobody yet</span>'}</div>`;
   }
   return `<div class="heat">${slots.map((h, i) => `<button class="hs ${need.includes(h) ? 'ko' : ''} ${sel === h ? 'hsel' : ''}" data-act="heat" data-v="${s.day}|${h}" title="${counts[i]} free ${slotLabel(h)}–${slotLabel(h+1)}">
       <div class="hb" style="opacity:${counts[i] ? .25 + .75 * counts[i] / max : .08}"></div><span>${counts[i]}</span><small>${pad(h % 24)}</small></button>`).join('')}</div>
@@ -765,13 +773,13 @@ function viewAvail(){
 function gInfo(key){
   const [day, hs] = key.split('|'), h = Number(hs), x = sessionOn(day); if (!x) return '';
   const sq = squad(day), rows = sq.inS.concat(sq.wait);
-  const nm = r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; };
+  const nm = nameWithGuests;
   const yes = rows.filter(r => rowSlots(x, r).includes(h)).map(nm).filter(Boolean);
   const no = rows.filter(r => !rowSlots(x, r).includes(h)).map(nm).filter(Boolean);
   const none = S.players.filter(p => !dayRows(day).some(r => r.player_id === p.id)).map(p => esc(p.name));
   return `<b>${fmtShort(day)}, ${slotLabel(h)}–${slotLabel(h + 1)}</b><br>
-    <span style="color:var(--accent)">Free (${yes.length}):</span> ${yes.join(', ') || '<span class="muted">nobody</span>'}<br>
-    <span style="color:var(--warn)">Not free:</span> ${no.join(', ') || '<span class="muted">nobody</span>'}
+    <span style="color:var(--accent)">Free (${yes.length}):</span> ${yes.join(' · ') || '<span class="muted">nobody</span>'}<br>
+    <span style="color:var(--warn)">Not free:</span> ${no.join(' · ') || '<span class="muted">nobody</span>'}
     ${none.length ? `<br><span class="muted">Not answered: ${none.join(', ')}</span>` : ''}`;
 }
 async function saveDays(days){
@@ -867,7 +875,7 @@ function paymentsBlock(s, sq){
   const trs = rows.map(({r, kind}) => {
     const p = playerById(r.player_id); if (!p) return '';
     const o = owesFor(r, s); exp += o; if (r.paid) got += o;
-    return `<tr><td>${esc(p.name)}${r.plus_ones ? ' +' + r.plus_ones : ''}${kind === 'late' ? ' <span class="tag late">late</span>' : ''}</td><td>${money(o)}</td>
+    return `<tr><td>${esc(p.name)}${guestList(r)}${kind === 'late' ? ' <span class="tag late">late</span>' : ''}</td><td>${money(o)}</td>
       <td><input type="checkbox" data-act="paid" data-v="${r.player_id}|${s.day}" ${r.paid ? 'checked' : ''} aria-label="Paid"></td>
       <td>${kind === 'late' ? `<input type="checkbox" data-act="waive" data-v="${r.player_id}|${s.day}" ${r.waived ? 'checked' : ''} aria-label="Waive">` : ''}</td></tr>`;
   }).join('');
@@ -892,7 +900,7 @@ function sessionCard(s){
   } else if (S.me && !S.isHost && s.day >= todayISO()){
     mine = confirmsClosed(s) ? '' : `<div class="mine-box">You're not down for this one. <button class="btn primary" data-act="goto" data-v="${s.day}">Open game</button></div>`;
   }
-  const names = sq.inS.map(r => { const p = playerById(r.player_id); return p ? esc(p.name) + (r.plus_ones ? ' +' + r.plus_ones : '') : ''; }).join(', ');
+  const names = sq.inS.map(nameWithGuests).filter(Boolean).join(' · ');
   return `<div class="card"><h3>${fmtDay(s.day)}</h3><div style="margin-bottom:10px">${statusLine(s)}</div>${progressBar(s, sq)}${sessionInfo(s)}${mine}
     <h4>In · ${sq.heads}/${sq.cap}${sq.wait.length ? ` · ${sq.wait.length} waiting` : ''}</h4><p style="margin:0">${names || '<span class="muted">Nobody yet</span>'}</p>
     ${S.isHost && isBooked(s) ? paymentsBlock(s, sq) : ''}${teamsBlock(s)}
