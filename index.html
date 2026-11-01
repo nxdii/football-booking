@@ -763,15 +763,17 @@ function gInfo(key){
     ${none.length ? `<br><span class="muted">Not answered: ${none.join(', ')}</span>` : ''}`;
 }
 async function saveDays(days){
+  let saved = false;
   for (const day of days){
-    const x = sessionOn(day), r = myRow(day), sl = [...(S.slotDraft[day] || [])].sort((a, b) => a - b);
+    const r = myRow(day), sl = [...(S.slotDraft[day] || [])].sort((a, b) => a - b);
     try {
-      if (sl.length) await API.setAvail({ player:S.me.id, token:S.me.token, day, on:true, slots:sl, plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 });
-      else if (r) await pullOut(day);
+      if (sl.length){ await API.setAvail({ player:S.me.id, token:S.me.token, day, on:true, slots:sl, plus:r ? r.plus_ones : 0, plusNames:r ? r.plus_one_names : '', plusSkill:r ? r.plus_one_skill : 3 }); saved = true; }
+      else if (r) await pullOut(day, { fromGrid:true });   // only this day, and only asks if it costs money
     } catch (e) { toast(e.message, true); }
     delete S.slotDraft[day];
   }
-  toast('Saved'); await reload();
+  if (saved) toast('Saved');
+  await reload();
 }
 
 // ----- teams
@@ -1013,16 +1015,21 @@ async function setMine(day, on){
     plusNames: on ? (document.getElementById('plusNames')?.value ?? myRow(day)?.plus_one_names ?? '') : '',
     plusSkill: on ? Number(document.getElementById('plusSkill')?.value ?? myRow(day)?.plus_one_skill ?? 3) : 3 });
 }
-async function pullOut(day){
+// Returns false if the person changed their mind. Only asks when it costs them money.
+async function pullOut(day, opts = {}){
   const sess = sessionOn(day), r = myRow(day);
   if (sess && r){
     const sq = squad(day);
     if (sq.inS.includes(r) && isBooked(sess) && suits(sess, r)){
-      if (!(await ask(`The pitch is already booked, so if you pull out now you still owe ${money(owesFor(r, sess))}. Pull out anyway?`, 'Pull out'))) return;
-    } else if (!(await ask('Pull out of this session?'))) return;
+      if (!(await ask(`The pitch for ${fmtDay(day)} is already booked, so if you pull out of that game you still owe ${money(owesFor(r, sess))}. Your other days aren't affected. Pull out of ${fmtShort(day)}?`, 'Pull out'))) {
+        if (opts.fromGrid) toast(`Kept you in for ${fmtShort(day)}`);
+        return false;
+      }
+    }
   }
   const res = await API.setAvail({ player:S.me.id, token:S.me.token, day, on:false });
-  toast(res === 'late_drop' ? 'Pulled out. The pitch was booked, so your share is still due' : 'Pulled out');
+  toast(res === 'late_drop' ? `Pulled out of ${fmtShort(day)}. The pitch was booked, so your share is still due` : `Removed you from ${fmtShort(day)}`);
+  return true;
 }
 
 const H = {
